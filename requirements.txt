@@ -1,0 +1,30 @@
+# Core dependencies
+numpy>=1.21.0
+opencv-python>=4.5.0
+Pillow>=8.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+pandas>=1.3.0
+scipy>=1.7.0
+scikit-image>=0.18.0
+scikit-learn>=1.0.0
+
+# YOLOv8 and computer vision
+ultralytics>=8.0.0
+torch>=1.12.0
+torchvision>=0.13.0
+
+# OCR dependencies
+paddlepaddle>=2.4.0
+paddleocr>=2.6.0
+easyocr>=1.6.0
+pytesseract>=0.3.10
+
+# Additional utilities
+PyYAML>=6.0
+tqdm>=4.64.0
+pathlib2>=2.3.0
+
+# Optional GPU acceleration
+# paddlepaddle-gpu>=2.4.0  # Uncomment for GPU support
+# torch-gpu  # Uncomment for GPU support
