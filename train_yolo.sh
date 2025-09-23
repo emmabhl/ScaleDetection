@@ -16,17 +16,6 @@ module load gcc python
 source ~/.bashrc
 source activate scale
 
-clearml-init
-api {
-    # Emma Boehly's workspace
-    web_server:https://app.clear.ml/
-    api_server:https://api.clear.ml
-    files_server:https://files.clear.ml
-    credentials {
-    "access_key"="A75PPTZQV7QNMJKKUKJM2X17XM8L4M"
-    "secret_key"="shECi5qzWFIxqr7aVkqI5imYcNWwdro0bdtaNTQxYdhle9s3J6pqUzYPi0Np4iJ3Xhk"
-}
-
 # Navigate to the project directory
 cd src
 
@@ -37,4 +26,4 @@ python get_data.py --path original1/scalebar-dataset --data_dir data
 python convert_jsons_to_yolo.py --data_dir data --validate
 
 # Step 3: Train the YOLO model
-python train_yolo.py --data_yaml data/data.yaml --model_name yolov8m.pt --epochs 100 --batch 16
+python train_yolo.py --data_yaml data/data.yaml --model_name yolov8m.pt --epochs 500 --batch 16
