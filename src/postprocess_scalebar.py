@@ -18,6 +18,8 @@ import numpy as np
 from typing import Tuple, List, Optional, Dict, Any
 from scipy import ndimage
 from scipy.signal import find_peaks
+from skimage.morphology import disk
+from skimage.filters import rank
 from skimage.filters import threshold_sauvola, threshold_otsu
 import matplotlib.pyplot as plt
 
@@ -50,29 +52,30 @@ def select_best_channel(image: np.ndarray) -> np.ndarray:
     return image[:, :, best_channel_idx].astype(np.uint8)
 
 
-def apply_adaptive_threshold(image: np.ndarray, method: str = 'sauvola', 
-                           window_size: int = 15, k: float = 0.2) -> np.ndarray:
+def apply_local_thresholding(image, radius=15):
     """
-    Apply adaptive thresholding to binarize the image.
-    
+    Apply local thresholding to generate a high-contrast binary image using local otsu method.
+
     Args:
-        image: Input grayscale image
-        method: Thresholding method ('sauvola' or 'otsu')
-        window_size: Window size for Sauvola thresholding
-        k: Parameter for Sauvola thresholding
-        
+        image: Grayscale input image (values in [0, 255] or [0, 1]).
+        radius: Radius of the local neighborhood (disk-shaped) used to compute local thresholds.
+
     Returns:
-        Binary image
+        binary: Binarized image with True for foreground and False for background.
     """
-    if method == 'sauvola':
-        threshold = threshold_sauvola(image, window_size=window_size, k=k)
-    elif method == 'otsu':
-        threshold = threshold_otsu(image)
+    # Ensure image is uint8 for rank filters
+    if image.dtype != np.uint8:
+        img = (255 * (image - image.min()) / (image.ptp() + 1e-8)).astype(np.uint8)
     else:
-        raise ValueError(f"Unknown thresholding method: {method}")
-    
-    binary = image > threshold
-    return binary.astype(np.uint8) * 255
+        img = image
+
+    # Compute local Otsu threshold per pixel
+    local_thresh = rank.otsu(img, disk(radius))
+
+    # Apply threshold
+    binary = img >= local_thresh
+
+    return binary
 
 
 def morphological_cleanup(binary: np.ndarray, kernel_size: int = 3) -> np.ndarray:
@@ -143,8 +146,11 @@ def compute_vertical_edge_projection(binary: np.ndarray) -> np.ndarray:
     return projection
 
 
-def find_scale_bar_endpoints(projection: np.ndarray, min_length: int = 10, 
-                           peak_prominence: float = 0.1) -> Tuple[int, int]:
+def find_scale_bar_endpoints(
+        projection: np.ndarray, 
+        min_length: int = 10, 
+        peak_prominence: float = 0.1
+    ) -> Tuple[int, int]:
     """
     Find scale bar endpoints using peak detection on the projection profile.
     
@@ -176,6 +182,13 @@ def find_scale_bar_endpoints(projection: np.ndarray, min_length: int = 10,
         end_idx = np.where(active_regions)[0][-1]
         
         return start_idx, end_idx
+    
+    if len(peaks) > 2:
+        # Select two most prominent peaks
+        prominences = properties['prominences']
+        top_two_indices = np.argsort(prominences)[-2:]
+        peaks = peaks[top_two_indices]
+        peaks = np.sort(peaks)
     
     # Use first and last significant peaks
     start_x = peaks[0]
@@ -231,9 +244,7 @@ def subpixel_refinement(image: np.ndarray, start_x: int, end_x: int,
 def localize_scale_bar_endpoints(
         image: np.ndarray, 
         bbox: Tuple[int, int, int, int],
-        method: str = 'sauvola', 
-        window_size: int = 15,
-        k: float = 0.2, 
+        radius: int = 15,
         min_length: int = 10,
         peak_prominence: float = 0.1
     ) -> Dict[str, Any]:
@@ -243,9 +254,7 @@ def localize_scale_bar_endpoints(
     Args:
         image: Input image
         bbox: Bounding box (x, y, width, height)
-        method: Thresholding method ('sauvola' or 'otsu')
-        window_size: Window size for Sauvola thresholding
-        k: Parameter for Sauvola thresholding
+        radius: Radius for local thresholding
         min_length: Minimum length for scale bar
         peak_prominence: Minimum prominence for peaks
         
@@ -270,17 +279,17 @@ def localize_scale_bar_endpoints(
         # Step 1: Channel selection
         best_channel = select_best_channel(roi)
         
-        # Step 2: Adaptive thresholding
-        binary = apply_adaptive_threshold(best_channel, method, window_size, k)
+        # Step 2: Local thresholding
+        binary = apply_local_thresholding(best_channel, radius=radius)
         
         # Step 3: Morphological cleanup
-        cleaned = morphological_cleanup(binary)
+        #cleaned = morphological_cleanup(binary)
         
         # Step 4: Find largest component
-        largest_component = find_largest_component(cleaned)
+        #largest_component = find_largest_component(cleaned)
         
         # Step 5: Compute vertical edge projection
-        projection = compute_vertical_edge_projection(largest_component)
+        projection = compute_vertical_edge_projection(binary)
         
         # Step 6: Find endpoints
         start_x, end_x = find_scale_bar_endpoints(projection, min_length, peak_prominence)
@@ -297,19 +306,16 @@ def localize_scale_bar_endpoints(
         
         # Compute pixel length
         pixel_length = abs(abs_end_x - abs_start_x)
-        
-        # Compute confidence based on projection strength
-        projection_strength = np.max(projection) / np.mean(projection) if np.mean(projection) > 0 else 0
-        confidence = min(1.0, projection_strength / 10.0)
-        
+                
         return {
             'success': True,
             'error': None,
             'endpoints': [(abs_start_x, y + y_center), (abs_end_x, y + y_center)],
             'pixel_length': pixel_length,
-            'confidence': confidence,
+            'best_channel': best_channel,
+            'binary_image': binary,
             'projection': projection,
-            'binary_image': largest_component
+            #'binary_image': largest_component
         }
         
     except Exception as e:
@@ -318,12 +324,15 @@ def localize_scale_bar_endpoints(
             'error': str(e),
             'endpoints': None,
             'pixel_length': 0,
-            'confidence': 0.0
         }
 
 
-def visualize_endpoint_detection(image: np.ndarray, bbox: Tuple[int, int, int, int],
-                               result: Dict[str, Any], save_path: Optional[str] = None) -> None:
+def visualize_endpoint_detection(
+        image: np.ndarray, 
+        bbox: Tuple[int, int, int, int],
+        result: Dict[str, Any],
+        save_path: Optional[str] = None
+    ) -> None:
     """
     Visualize the endpoint detection process and results.
     
@@ -344,55 +353,58 @@ def visualize_endpoint_detection(image: np.ndarray, bbox: Tuple[int, int, int, i
     axes[0, 0].axis('off')
     
     # Best channel
-    if 'binary_image' in result and result['binary_image'] is not None:
-        axes[0, 1].imshow(result['binary_image'], cmap='gray')
-        axes[0, 1].set_title('Binary Image')
+    if 'best_channel' in result and result['best_channel'] is not None:
+        axes[0, 1].imshow(result['best_channel'], cmap='gray')
+        axes[0, 1].set_title('Best Channel')
         axes[0, 1].axis('off')
-    
+
+    # Binary image
+    if 'binary_image' in result and result['binary_image'] is not None:
+        axes[0, 2].imshow(result['binary_image'], cmap='gray')
+        axes[0, 2].set_title('Binary Image')
+        axes[0, 2].axis('off')
+
     # Projection profile
     if 'projection' in result and result['projection'] is not None:
-        axes[0, 2].plot(result['projection'])
-        axes[0, 2].set_title('Vertical Projection')
-        axes[0, 2].set_xlabel('X coordinate')
-        axes[0, 2].set_ylabel('Projection strength')
-        axes[0, 2].grid(True)
+        axes[1, 0].plot(result['projection'])
+        axes[1, 0].set_title('Vertical Projection')
+        axes[1, 0].set_xlabel('X coordinate')
+        axes[1, 0].set_ylabel('Projection strength')
+        axes[1, 0].grid(True)
     
     # Result visualization
-    axes[1, 0].imshow(roi, cmap='gray')
+    axes[1, 1].imshow(roi, cmap='gray')
     if result['success'] and result['endpoints']:
         start_pt, end_pt = result['endpoints']
         # Convert back to ROI coordinates
         rel_start = (start_pt[0] - x, start_pt[1] - y)
         rel_end = (end_pt[0] - x, end_pt[1] - y)
         
-        axes[1, 0].plot([rel_start[0], rel_end[0]], [rel_start[1], rel_end[1]], 
+        axes[1, 1].plot([rel_start[0], rel_end[0]], [rel_start[1], rel_end[1]], 
                        'r-', linewidth=3, label='Detected scale bar')
-        axes[1, 0].plot(rel_start[0], rel_start[1], 'go', markersize=8, label='Start')
-        axes[1, 0].plot(rel_end[0], rel_end[1], 'ro', markersize=8, label='End')
-        axes[1, 0].legend()
+        axes[1, 1].plot(rel_start[0], rel_start[1], 'go', markersize=8, label='Start')
+        axes[1, 1].plot(rel_end[0], rel_end[1], 'ro', markersize=8, label='End')
+        axes[1, 1].legend()
     
-    axes[1, 0].set_title(f'Result (Length: {result["pixel_length"]:.1f}px)')
-    axes[1, 0].axis('off')
+    axes[1, 1].set_title(f'Result (Length: {result["pixel_length"]:.1f}px)')
+    axes[1, 1].axis('off')
     
     # Full image with detection
-    axes[1, 1].imshow(image, cmap='gray')
+    axes[1, 2].imshow(image, cmap='gray')
     if result['success'] and result['endpoints']:
         start_pt, end_pt = result['endpoints']
-        axes[1, 1].plot([start_pt[0], end_pt[0]], [start_pt[1], end_pt[1]], 
+        axes[1, 2].plot([start_pt[0], end_pt[0]], [start_pt[1], end_pt[1]], 
                        'r-', linewidth=3, label='Detected scale bar')
-        axes[1, 1].plot(start_pt[0], start_pt[1], 'go', markersize=8, label='Start')
-        axes[1, 1].plot(end_pt[0], end_pt[1], 'ro', markersize=8, label='End')
-        axes[1, 1].legend()
+        axes[1, 2].plot(start_pt[0], start_pt[1], 'go', markersize=8, label='Start')
+        axes[1, 2].plot(end_pt[0], end_pt[1], 'ro', markersize=8, label='End')
+        axes[1, 2].legend()
     
     # Draw bounding box
     rect = plt.Rectangle((x, y), w, h, linewidth=2, edgecolor='blue', facecolor='none')
-    axes[1, 1].add_patch(rect)
-    axes[1, 1].set_title('Full Image Detection')
-    axes[1, 1].axis('off')
-    
-    # Hide unused subplot
+    axes[1, 2].add_patch(rect)
+    axes[1, 2].set_title('Full Image Detection')
     axes[1, 2].axis('off')
-    
+        
     plt.tight_layout()
     
     if save_path:

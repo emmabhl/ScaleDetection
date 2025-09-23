@@ -12,7 +12,8 @@
 module load gcc python
 
 # Activate virtual environment if needed
-source ~/envs/scale/bin/activate
+source ~/.bashrc
+source activate scale
 
 # Navigate to the project directory
 cd src
