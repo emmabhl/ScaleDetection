@@ -1,12 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=train_yolo
-#SBATCH --output=train_yolo_%j.log
-#SBATCH --error=train_yolo_%j.err
-#SBATCH --time=1:00:00
-#SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=12G
+#SBATCH --time=1:00:00
+#SBATCH --job-name=train_yolo
+#SBATCH --output=slogs/%x_%A-%a_%n-%t.out
+                            # %x=job-name, %A=job ID, %a=array value, %n=node rank, %t=task rank, %N=hostname
+#SBATCH --qos=normal
+#SBATCH --open-mode=append
 
 # Load necessary modules
 module load gcc python
