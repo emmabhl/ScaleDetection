@@ -10,7 +10,6 @@ ultralytics
 clearml
 
 # Image processing
-opencv
 scipy
 scikit-image
 
