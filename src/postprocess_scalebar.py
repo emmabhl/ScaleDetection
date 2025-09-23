@@ -18,7 +18,6 @@ import numpy as np
 from typing import Tuple, List, Optional, Dict, Any
 from scipy import ndimage
 from scipy.signal import find_peaks
-from skimage import filters, morphology, measure
 from skimage.filters import threshold_sauvola, threshold_otsu
 import matplotlib.pyplot as plt
 
@@ -33,15 +32,10 @@ def select_best_channel(image: np.ndarray) -> np.ndarray:
     Returns:
         Single channel image with strongest edges
     """
+    # If image is grayscale, return as is
     if len(image.shape) == 2:
         return image
-    
-    # Convert to grayscale if needed
-    if image.shape[2] == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = image
-    
+        
     # Compute Sobel magnitude for each channel
     sobel_magnitudes = []
     for i in range(image.shape[2]):
@@ -104,13 +98,12 @@ def morphological_cleanup(binary: np.ndarray, kernel_size: int = 3) -> np.ndarra
     return cleaned
 
 
-def find_largest_component(binary: np.ndarray, min_area: int = 100) -> np.ndarray:
+def find_largest_component(binary: np.ndarray) -> np.ndarray:
     """
     Find the largest connected component in the binary image.
     
     Args:
         binary: Binary image
-        min_area: Minimum area for components
         
     Returns:
         Binary image with only the largest component
@@ -235,10 +228,15 @@ def subpixel_refinement(image: np.ndarray, start_x: int, end_x: int,
     return refined_start_x, refined_end_x
 
 
-def localize_scale_bar_endpoints(image: np.ndarray, bbox: Tuple[int, int, int, int],
-                               method: str = 'sauvola', window_size: int = 15,
-                               k: float = 0.2, min_length: int = 10,
-                               peak_prominence: float = 0.1) -> Dict[str, Any]:
+def localize_scale_bar_endpoints(
+        image: np.ndarray, 
+        bbox: Tuple[int, int, int, int],
+        method: str = 'sauvola', 
+        window_size: int = 15,
+        k: float = 0.2, 
+        min_length: int = 10,
+        peak_prominence: float = 0.1
+    ) -> Dict[str, Any]:
     """
     Main function to localize scale bar endpoints within a bounding box.
     

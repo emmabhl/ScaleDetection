@@ -208,3 +208,17 @@ __marimo__/
 
 # Data files
 data/
+data_small/
+*.jpg
+
+# Models
+*.pt
+models/
+
+# Logs
+*logs*
+.DS_Store
+
+# Outputs
+output/
+

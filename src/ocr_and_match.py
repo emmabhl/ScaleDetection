@@ -24,6 +24,8 @@ from dataclasses import dataclass
 import logging
 from paddleocr import PaddleOCR
 
+from utils import points_to_xywh
+
 @dataclass
 class TextDetection:
     """Data class for text detection results."""
@@ -155,10 +157,7 @@ class OCRProcessor:
         """Initialize the OCR engine based on backend."""
         if self.backend == 'paddle':
             self.ocr_engine = PaddleOCR(
-                use_angle_cls=True, 
-                lang=self.lang,
-                use_gpu=True,
-                show_log=False
+                lang=self.lang
             )
         else:
             raise ValueError(f"Backend {self.backend} not available or not installed")
@@ -209,7 +208,7 @@ class OCRProcessor:
         
         try:
             if self.backend == 'paddle':
-                results = self.ocr_engine.ocr(preprocessed, cls=True)
+                results = self.ocr_engine.predict(preprocessed)
                 if results and results[0]:
                     for line in results[0]:
                         bbox = line[0]
@@ -337,6 +336,97 @@ class ScaleDetectionPipeline:
         self.scale_matcher = ScaleMatcher(max_distance_ratio)
         self.text_parser = TextParser()
     
+    def process_yolo_detections(self, image: np.ndarray, yolo_results) -> Dict[str, Any]:
+        """
+        Process YOLO detection results to extract scale bars and text labels, then apply OCR to text regions.
+        
+        Args:
+            image: Input image
+            yolo_results: YOLO detection results (ultralytics Results object)
+            
+        Returns:
+            Dictionary containing results
+        """
+        # Extract bounding boxes, scores, and classes from YOLO results
+        boxes = yolo_results.boxes.xyxy.cpu().numpy()  # Bounding boxes in xyxy format
+        scores = yolo_results.boxes.conf.cpu().numpy()  # Confidence scores
+        classes = yolo_results.boxes.cls.cpu().numpy()  # Class IDs
+        
+        # Separate scale bars (class 0) and text labels (class 1)
+        scale_bar_detections = []
+        text_label_detections = []
+        
+        for i, (box, score, cls) in enumerate(zip(boxes, scores, classes)):
+            # Convert from xyxy to xywh format
+            x1, y1, x2, y2 = box
+            x, y, w, h = x1, y1, x2 - x1, y2 - y1
+            center = (x + w/2, y + h/2)
+            
+            if cls == 0:  # Scale bar
+                scale_bar_detections.append(ScaleBarDetection(
+                    bbox=(int(x), int(y), int(w), int(h)),
+                    center=center,
+                    confidence=float(score),
+                    pixel_length=None,  # Will be calculated later if needed
+                    endpoints=None
+                ))
+            elif cls == 1:  # Text label
+                text_label_detections.append({
+                    'bbox': (int(x), int(y), int(w), int(h)),
+                    'center': center,
+                    'confidence': float(score)
+                })
+        
+        # Apply OCR to text label regions only
+        text_detections = []
+        for text_label in text_label_detections:
+            x, y, w, h = text_label['bbox']
+            
+            # Extract crop with some margin for better OCR
+            margin = 5
+            x_start = max(0, x - margin)
+            y_start = max(0, y - margin)
+            x_end = min(image.shape[1], x + w + margin)
+            y_end = min(image.shape[0], y + h + margin)
+            
+            crop = image[y_start:y_end, x_start:x_end]
+            
+            if crop.size == 0:
+                continue
+            
+            # Apply OCR to the crop
+            crop_text_detections = self.ocr_processor.detect_text(crop)
+            
+            # Adjust coordinates back to original image
+            for text in crop_text_detections:
+                # Adjust bbox coordinates
+                adjusted_bbox = []
+                for point in text.bbox:
+                    adjusted_bbox.append([point[0] + x_start, point[1] + y_start])
+                text.bbox = adjusted_bbox
+                
+                # Adjust center coordinates
+                text.center = (text.center[0] + x_start, text.center[1] + y_start)
+            
+            text_detections.extend(crop_text_detections)
+        
+        # Match text to scale bars
+        matches = self.scale_matcher.match_text_to_bars(text_detections, scale_bar_detections)
+        
+        # Prepare results
+        results = {
+            'text_detections': text_detections,
+            'bar_detections': scale_bar_detections,
+            'matches': matches,
+            'successful_matches': len(matches),
+            'total_text_detections': len(text_detections),
+            'total_bar_detections': len(scale_bar_detections),
+            'yolo_scale_bars': len(scale_bar_detections),
+            'yolo_text_labels': len(text_label_detections)
+        }
+        
+        return results
+
     def process_image(self, image: np.ndarray, bar_detections: List[ScaleBarDetection]) -> Dict[str, Any]:
         """
         Process image to detect text and match with scale bars.
@@ -473,10 +563,12 @@ class ScaleDetectionPipeline:
 def main():
     """Main function for command-line usage."""
     import argparse
+    from ultralytics import YOLO
     
     parser = argparse.ArgumentParser(description='OCR and scale matching pipeline')
     parser.add_argument('--image', type=str, required=True, help='Path to input image')
-    parser.add_argument('--bars_json', type=str, required=True, help='Path to scale bar detections JSON')
+    parser.add_argument('--model', type=str, help='Path to YOLO model for detection')
+    parser.add_argument('--bars_json', type=str, help='Path to scale bar detections JSON (alternative to model)')
     parser.add_argument('--output', type=str, required=True, help='Path to save results JSON')
     parser.add_argument('--ocr_backend', type=str, default='paddle', 
                        choices=['paddle', 'easyocr', 'tesseract'],
@@ -487,6 +579,8 @@ def main():
                        help='Maximum distance ratio for text-bar matching')
     parser.add_argument('--use_crops', action='store_true',
                        help='Process crops around scale bars instead of full image')
+    parser.add_argument('--yolo_conf', type=float, default=0.25,
+                       help='YOLO confidence threshold for detections')
     
     args = parser.parse_args()
     
@@ -498,23 +592,6 @@ def main():
     
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
-    # Load scale bar detections
-    with open(args.bars_json, 'r') as f:
-        bars_data = json.load(f)
-    
-    # Convert to ScaleBarDetection objects
-    bar_detections = []
-    for bar_data in bars_data.get('bars', []):
-        bbox = bar_data['bbox']
-        center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
-        bar_detections.append(ScaleBarDetection(
-            bbox=tuple(bbox),
-            center=center,
-            confidence=bar_data.get('confidence', 1.0),
-            pixel_length=bar_data.get('pixel_length'),
-            endpoints=bar_data.get('endpoints')
-        ))
-    
     # Initialize pipeline
     pipeline = ScaleDetectionPipeline(
         ocr_backend=args.ocr_backend,
@@ -523,10 +600,36 @@ def main():
     )
     
     # Process image
-    if args.use_crops:
-        results = pipeline.process_crops(image, bar_detections)
+    if args.model:
+        # Use YOLO model for detection
+        model = YOLO(args.model)
+        yolo_results = model.predict(image, conf=args.yolo_conf, verbose=False)
+        results = pipeline.process_yolo_detections(image, yolo_results[0])
+    elif args.bars_json:
+        # Use pre-computed detections
+        with open(args.bars_json, 'r') as f:
+            bars_data = json.load(f)
+        
+        # Convert to ScaleBarDetection objects
+        bar_detections = []
+        for bar_data in bars_data.get('bars', []):
+            bbox = bar_data['bbox']
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            bar_detections.append(ScaleBarDetection(
+                bbox=tuple(bbox),
+                center=center,
+                confidence=bar_data.get('confidence', 1.0),
+                pixel_length=bar_data.get('pixel_length'),
+                endpoints=bar_data.get('endpoints')
+            ))
+        
+        if args.use_crops:
+            results = pipeline.process_crops(image, bar_detections)
+        else:
+            results = pipeline.process_image(image, bar_detections)
     else:
-        results = pipeline.process_image(image, bar_detections)
+        print("Error: Either --model or --bars_json must be provided")
+        return
     
     # Save results
     pipeline.save_results(results, args.output)
@@ -535,6 +638,9 @@ def main():
     print(f"Processed image: {args.image}")
     print(f"Text detections: {results['total_text_detections']}")
     print(f"Scale bar detections: {results['total_bar_detections']}")
+    if 'yolo_scale_bars' in results:
+        print(f"YOLO scale bars: {results['yolo_scale_bars']}")
+        print(f"YOLO text labels: {results['yolo_text_labels']}")
     print(f"Successful matches: {results['successful_matches']}")
     
     for i, match in enumerate(results['matches']):
