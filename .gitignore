@@ -213,7 +213,7 @@ data_small/
 
 # Models
 *.pt
-models/
+models*/
 
 # Logs
 *logs*

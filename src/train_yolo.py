@@ -60,7 +60,7 @@ def train_model(
     """Train YOLOv8 model."""
 
     if resume:
-        path = model_dir + '/' + name + '/weights/last.pt'
+        path = str(model_dir) + '/' + name + '/weights/last.pt'
         model = YOLO(path)    
     else:
         model = YOLO(model_name)
@@ -248,13 +248,6 @@ def main():
     # Create model directory if it doesn't exist
     MODEL_DIR = Path(args.model_dir)
     os.makedirs(MODEL_DIR, exist_ok=True)
-
-    # Check if project name already exists
-    subdir = MODEL_DIR / args.name
-    if subdir.exists() and not args.resume:
-        raise FileExistsError(
-            f"Experiment directory {subdir} already exists. Use --resume to continue training."
-        )
 
     # Train model
     print("Starting YOLOv8 training...")
