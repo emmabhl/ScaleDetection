@@ -1,7 +1,6 @@
 # Core dependencies
 numpy
 pandas
-matplotlib-base
 
 # Download data
 kagglehub
