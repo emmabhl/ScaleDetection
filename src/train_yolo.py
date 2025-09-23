@@ -36,9 +36,8 @@ Arguments:
 
 import os
 import argparse
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 from ultralytics import YOLO
-import matplotlib.pyplot as plt
 from pathlib import Path
 
 def train_model(

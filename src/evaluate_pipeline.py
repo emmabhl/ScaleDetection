@@ -17,7 +17,6 @@ import os
 import json
 import numpy as np
 from typing import List, Dict, Tuple, Any, Optional, Union
-import cv2
 from dataclasses import dataclass
 import warnings
 warnings.filterwarnings('ignore')

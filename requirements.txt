@@ -1,30 +1,20 @@
 # Core dependencies
-numpy>=1.21.0
-opencv-python>=4.5.0
-Pillow>=8.0.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
-pandas>=1.3.0
-scipy>=1.7.0
-scikit-image>=0.18.0
-scikit-learn>=1.0.0
+python==3.11.13
+numpy==2.3.2
+pandas==2.3.2
+matplotlib-base==3.10.6
 
-# YOLOv8 and computer vision
-ultralytics>=8.0.0
-torch>=1.12.0
-torchvision>=0.13.0
+# Download data
+kagglehub==0.2.7
 
-# OCR dependencies
-paddlepaddle>=2.4.0
-paddleocr>=2.6.0
-easyocr>=1.6.0
-pytesseract>=0.3.10
+# Train YOLO
+ultralytics==8.3.197
+clearml==2.0.2
 
-# Additional utilities
-PyYAML>=6.0
-tqdm>=4.64.0
-pathlib2>=2.3.0
+# Image processing
+opencv==4.12.0
+scipy==1.16.1
+scikit-image==0.25.2
 
-# Optional GPU acceleration
-# paddlepaddle-gpu>=2.4.0  # Uncomment for GPU support
-# torch-gpu  # Uncomment for GPU support
+# OCR
+paddleocr==3.2.0

@@ -9,8 +9,7 @@
 #SBATCH --cpus-per-task=8
 
 # Load necessary modules
-module load python/3.9
-module load cuda/11.7
+module load gcc python
 
 # Activate virtual environment if needed
 source ~/envs/scale/bin/activate
