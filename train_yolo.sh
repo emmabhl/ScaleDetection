@@ -14,7 +14,7 @@ module load gcc python
 
 # Activate virtual environment if needed
 source ~/.bashrc
-source activate scale
+conda activate scale
 
 # Navigate to the project directory
 cd src
