@@ -16,14 +16,15 @@ module load gcc python
 source ~/.bashrc
 source activate scale
 
+clearml-init
 api {
-# Emma Boehly's workspace
-web_server:https://app.clear.ml/
-api_server:https://api.clear.ml
-files_server:https://files.clear.ml
-credentials {
-"access_key"="A75PPTZQV7QNMJKKUKJM2X17XM8L4M"
-"secret_key"="shECi5qzWFIxqr7aVkqI5imYcNWwdro0bdtaNTQxYdhle9s3J6pqUzYPi0Np4iJ3Xhk"
+    # Emma Boehly's workspace
+    web_server:https://app.clear.ml/
+    api_server:https://api.clear.ml
+    files_server:https://files.clear.ml
+    credentials {
+    "access_key"="A75PPTZQV7QNMJKKUKJM2X17XM8L4M"
+    "secret_key"="shECi5qzWFIxqr7aVkqI5imYcNWwdro0bdtaNTQxYdhle9s3J6pqUzYPi0Np4iJ3Xhk"
 }
 
 # Navigate to the project directory
