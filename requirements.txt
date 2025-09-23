@@ -1,19 +1,19 @@
 # Core dependencies
-numpy==2.3.2
-pandas==2.3.2
-matplotlib-base==3.10.6
+numpy
+pandas
+matplotlib-base
 
 # Download data
-kagglehub==0.2.7
+kagglehub
 
 # Train YOLO
-ultralytics==8.3.197
-clearml==2.0.2
+ultralytics
+clearml
 
 # Image processing
-opencv==4.12.0
-scipy==1.16.1
-scikit-image==0.25.2
+opencv
+scipy
+scikit-image
 
 # OCR
-paddleocr==3.2.0
+paddleocr
