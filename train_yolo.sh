@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=12G
 #SBATCH --time=0:10:00
@@ -10,7 +10,7 @@
 #SBATCH --open-mode=append
 
 # Load necessary modules
-module load gcc python opencv/4.12.0
+module load gcc python opencv/4.12.0 cuda
 
 # Activate virtual environment
 source scale/bin/activate
