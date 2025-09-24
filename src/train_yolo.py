@@ -227,23 +227,23 @@ def main():
     parser.add_argument('--export_format', type=str, default='onnx', help='Export format')
 
     # ClearML flags
-    parser.add_argument('--clearml', action='store_true', help='Enable ClearML experiment tracking')
-    parser.add_argument('--clearml_project', type=str, default='scale_detection', 
-                        help='ClearML project name')
+    #parser.add_argument('--clearml', action='store_true', help='Enable ClearML experiment tracking')
+    #parser.add_argument('--clearml_project', type=str, default='scale_detection', 
+    #                    help='ClearML project name')
     
     args = parser.parse_args()
     
     # Optional: initialize ClearML Task
     task = None
-    if args.clearml:
-        try:
-            from clearml import Task
-            task = Task.init(
-                project_name=args.clearml_project,
-            )
-        except Exception as e:
-            print(f"Warning: ClearML not initialized ({e}). Continue without tracking.")
-            task = None
+    #if args.clearml:
+    #    try:
+    #        from clearml import Task
+    #        task = Task.init(
+    #            project_name=args.clearml_project,
+    #        )
+    #    except Exception as e:
+    #        print(f"Warning: ClearML not initialized ({e}). Continue without tracking.")
+    #        task = None
 
     # Create model directory if it doesn't exist
     MODEL_DIR = Path(args.model_dir)
