@@ -10,11 +10,10 @@
 #SBATCH --open-mode=append
 
 # Load necessary modules
-module load gcc python
+module load gcc python opencv/4.12.0
 
-# Activate virtual environment if needed
-source ~/.bashrc
-source activate scale
+# Activate virtual environment
+source scale/bin/activate
 
 # Navigate to the project directory
 cd src

@@ -4,6 +4,7 @@ pandas
 
 # Download data
 kagglehub
+yaml
 
 # Train YOLO
 ultralytics
