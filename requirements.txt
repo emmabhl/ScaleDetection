@@ -69,7 +69,7 @@ pygments==2.19.2
 pyparsing==3.0.9
 pysocks==1.7.1
 python-dateutil==2.8.2
-python-flatbuffers==25.2.10
+python-flatbuffers
 python-tzdata==2025.2
 python-xxhash==3.5.0
 pytz==2025.2
