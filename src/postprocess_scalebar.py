@@ -78,7 +78,7 @@ def apply_local_thresholding(image, radius=15):
     return binary.astype(np.uint8) * 255
 
 
-def morphological_cleanup(binary: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+def morphological_cleanup(binary: np.ndarray, kernel_size) -> np.ndarray:
     """
     Apply morphological operations to clean up the binary image.
     
@@ -138,7 +138,7 @@ def compute_vertical_edge_projection(binary: np.ndarray) -> np.ndarray:
         Vertical projection profile
     """
     # Compute vertical gradients
-    sobel_y = cv2.Sobel(binary, cv2.CV_64F, 0, 1, ksize=3)
+    sobel_y = cv2.Sobel(binary, cv2.CV_64F, 0, 1, ksize=5)
     
     # Sum along vertical axis to get horizontal profile
     projection = np.sum(np.abs(sobel_y), axis=0)
@@ -245,6 +245,7 @@ def localize_scale_bar_endpoints(
         image: np.ndarray, 
         bbox: Tuple[int, int, int, int],
         radius: int = 15,
+        kernel_size: int = 4,
         min_length: int = 10,
         peak_prominence: float = 0.1
     ) -> Dict[str, Any]:
@@ -255,6 +256,7 @@ def localize_scale_bar_endpoints(
         image: Input image
         bbox: Bounding box (x, y, width, height)
         radius: Radius for local thresholding
+        kernel_size: Kernel size for morphological operations
         min_length: Minimum length for scale bar
         peak_prominence: Minimum prominence for peaks
         
@@ -262,17 +264,24 @@ def localize_scale_bar_endpoints(
         Dictionary containing endpoint coordinates and metadata
     """
     x, y, w, h = bbox
+
+    # Increase ROI to include some context and ensure full scale bar is captured
+    hpad = int(0.1 * h)
+    vpad = int(0.1 * w)
+    x = max(0, x - vpad)
+    y = max(0, y - hpad)
+    w = min(image.shape[1] - x, w + 2 * vpad)
+    h = min(image.shape[0] - y, h + 2 * hpad)
     
     # Extract ROI
     roi = image[y:y+h, x:x+w]
-    
+
     if roi.size == 0:
         return {
             'success': False,
             'error': 'Empty ROI',
             'endpoints': None,
             'pixel_length': 0,
-            'confidence': 0.0
         }
     
     try:
@@ -282,28 +291,18 @@ def localize_scale_bar_endpoints(
 
         # Step 1: Channel selection
         best_channel = select_best_channel(roi)
-        print(f"Selected best channel: {best_channel.shape}")
-        print(f"Best channel: {best_channel}\n")
         
         # Step 2: Local thresholding
         binary = apply_local_thresholding(best_channel, radius=radius)
-        print(f"Applied local thresholding: {binary.shape}")
-        print(f"Binary image: {binary}\n")
 
         # Step 3: Morphological cleanup
-        cleaned = morphological_cleanup(binary)
-        print(f"Cleaned binary image: {cleaned.shape}")
-        print(f"Cleaned binary image: {cleaned}\n")
+        cleaned = morphological_cleanup(binary, kernel_size=kernel_size)
         
         # Step 4: Find largest component
         largest_component = find_largest_component(cleaned)
-        print(f"Largest component image: {largest_component.shape}")
-        print(f"Largest component: {largest_component}\n")
         
         # Step 5: Compute vertical edge projection
-        projection = compute_vertical_edge_projection(binary)
-        print(f"Projection profile: {projection.shape}")
-        print(f"Projection: {projection}\n")
+        projection = compute_vertical_edge_projection(largest_component)
         
         # Step 6: Find endpoints
         start_x, end_x = find_scale_bar_endpoints(projection, min_length, peak_prominence)
@@ -328,8 +327,9 @@ def localize_scale_bar_endpoints(
             'pixel_length': pixel_length,
             'best_channel': best_channel,
             'binary_image': binary,
+            'cleaned_image': cleaned,
+            'largest_component': largest_component,
             'projection': projection,
-            #'binary_image': largest_component
         }
         
     except Exception as e:
@@ -357,9 +357,17 @@ def visualize_endpoint_detection(
         save_path: Path to save visualization (optional)
     """
     x, y, w, h = bbox
+    # Add padding for better context
+    hpad = int(0.1 * h)
+    vpad = int(0.1 * w)
+    x = max(0, x - vpad)
+    y = max(0, y - hpad)
+    w = min(image.shape[1] - x, w + 2 * vpad)
+    h = min(image.shape[0] - y, h + 2 * hpad)
     roi = image[y:y+h, x:x+w]
+
     
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(2, 4, figsize=(15, 10))
     
     # Original ROI
     axes[0, 0].imshow(roi, cmap='gray')
@@ -378,46 +386,58 @@ def visualize_endpoint_detection(
         axes[0, 2].set_title('Binary Image')
         axes[0, 2].axis('off')
 
+    # Cleaned image
+    if 'cleaned_image' in result and result['cleaned_image'] is not None:
+        axes[0, 3].imshow(result['cleaned_image'], cmap='gray')
+        axes[0, 3].set_title('Cleaned Image')
+        axes[0, 3].axis('off')
+
+    # Largest component
+    if 'largest_component' in result and result['largest_component'] is not None:
+        axes[1, 0].imshow(result['largest_component'], cmap='gray')
+        axes[1, 0].set_title('Largest Component')
+        axes[1, 0].axis('off')
+
     # Projection profile
     if 'projection' in result and result['projection'] is not None:
-        axes[1, 0].plot(result['projection'])
-        axes[1, 0].set_title('Vertical Projection')
-        axes[1, 0].set_xlabel('X coordinate')
-        axes[1, 0].set_ylabel('Projection strength')
-        axes[1, 0].grid(True)
+        axes[1, 1].plot(result['projection'])
+        axes[1, 1].set_title('Vertical Projection')
+        axes[1, 1].set_xlabel('X coordinate')
+        axes[1, 1].set_ylabel('Projection strength')
+        axes[1, 1].grid(True)
     
     # Result visualization
-    axes[1, 1].imshow(roi, cmap='gray')
+    axes[1, 2].imshow(roi, cmap='gray')
     if result['success'] and result['endpoints']:
         start_pt, end_pt = result['endpoints']
         # Convert back to ROI coordinates
         rel_start = (start_pt[0] - x, start_pt[1] - y)
         rel_end = (end_pt[0] - x, end_pt[1] - y)
         
-        axes[1, 1].plot([rel_start[0], rel_end[0]], [rel_start[1], rel_end[1]], 
+        axes[1, 2].plot([rel_start[0], rel_end[0]], [rel_start[1], rel_end[1]], 
                        'r-', linewidth=3, label='Detected scale bar')
-        axes[1, 1].plot(rel_start[0], rel_start[1], 'go', markersize=8, label='Start')
-        axes[1, 1].plot(rel_end[0], rel_end[1], 'ro', markersize=8, label='End')
-        axes[1, 1].legend()
+        axes[1, 2].plot(rel_start[0], rel_start[1], 'go', markersize=8, label='Start')
+        axes[1, 2].plot(rel_end[0], rel_end[1], 'ro', markersize=8, label='End')
+        axes[1, 2].legend()
     
-    axes[1, 1].set_title(f'Result (Length: {result["pixel_length"]:.1f}px)')
-    axes[1, 1].axis('off')
+    axes[1, 2].set_title(f'Result (Length: {result["pixel_length"]:.1f}px)')
+    axes[1, 2].axis('off')
     
     # Full image with detection
-    axes[1, 2].imshow(image, cmap='gray')
+    axes[1, 3].imshow(image, cmap='gray')
     if result['success'] and result['endpoints']:
         start_pt, end_pt = result['endpoints']
-        axes[1, 2].plot([start_pt[0], end_pt[0]], [start_pt[1], end_pt[1]], 
+        axes[1, 3].plot([start_pt[0], end_pt[0]], [start_pt[1], end_pt[1]], 
                        'r-', linewidth=3, label='Detected scale bar')
-        axes[1, 2].plot(start_pt[0], start_pt[1], 'go', markersize=8, label='Start')
-        axes[1, 2].plot(end_pt[0], end_pt[1], 'ro', markersize=8, label='End')
-        axes[1, 2].legend()
+        axes[1, 3].plot(start_pt[0], start_pt[1], 'go', markersize=8, label='Start')
+        axes[1, 3].plot(end_pt[0], end_pt[1], 'ro', markersize=8, label='End')
+        axes[1, 3].legend()
     
     # Draw bounding box
     rect = plt.Rectangle((x, y), w, h, linewidth=2, edgecolor='blue', facecolor='none')
-    axes[1, 2].add_patch(rect)
-    axes[1, 2].set_title('Full Image Detection')
-    axes[1, 2].axis('off')
+    axes[1, 3].add_patch(rect)
+    axes[1, 3].set_title('Full Image Detection')
+    axes[1, 3].axis('off')
         
     plt.tight_layout()
     
