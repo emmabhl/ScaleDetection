@@ -10,8 +10,9 @@ seaborn==0.13.2
 # torch==2.5.1
 #torchvision==0.20.1
 tqdm==4.67.1
-ultralytics==8.3.203
 opencv
+opencv-contrib-python
+ultralytics==8.3.203
 
 # pip-only section from environment.yml
 clearml==2.0.2

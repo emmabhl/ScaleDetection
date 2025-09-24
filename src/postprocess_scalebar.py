@@ -285,10 +285,6 @@ def localize_scale_bar_endpoints(
         }
     
     try:
-        print(f"Processing ROI at ({x}, {y}), size ({w}x{h})")
-        print(f"ROI shape: {roi.shape}")
-        print(f"ROI: {roi}\n")
-
         # Step 1: Channel selection
         best_channel = select_best_channel(roi)
         
