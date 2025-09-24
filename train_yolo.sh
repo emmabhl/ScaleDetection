@@ -10,7 +10,7 @@
 #SBATCH --open-mode=append
 
 # Load necessary modules
-module load python/3.12 cuda/12.2 arrow/21.0.0
+module load python/3.12 cuda/12.3 arrow/21.0.0 opencv/4.12.0
 
 # Activate virtual environment
 source ~/.bashrc
