@@ -75,7 +75,7 @@ def apply_local_thresholding(image, radius=15):
     # Apply threshold
     binary = img >= local_thresh
 
-    return binary
+    return binary.astype(np.uint8) * 255
 
 
 def morphological_cleanup(binary: np.ndarray, kernel_size: int = 3) -> np.ndarray:
@@ -276,20 +276,40 @@ def localize_scale_bar_endpoints(
         }
     
     try:
+        print(f"Processing ROI at ({x}, {y}), size ({w}x{h})")
+        print(f"ROI shape: {roi.shape}")
+        print(f"ROI stats - min: {roi.min()}, max: {roi.max()}, mean: {roi.mean():.2f}, std: {roi.std():.2f}")
+        print(f"ROI: {roi}\n")
+
         # Step 1: Channel selection
         best_channel = select_best_channel(roi)
+        print(f"Selected best channel: {best_channel.shape}")
+        print(f"Best channel stats - min: {best_channel.min()}, max: {best_channel.max()}, mean: {best_channel.mean():.2f}, std: {best_channel.std():.2f}")
+        print(f"Best channel: {best_channel}\n")
         
         # Step 2: Local thresholding
         binary = apply_local_thresholding(best_channel, radius=radius)
-        
+        print(f"Applied local thresholding: {binary.shape}")
+        print(f"Binary image stats - min: {binary.min()}, max: {binary.max()}, mean: {binary.mean():.2f}, std: {binary.std():.2f}")
+        print(f"Binary image: {binary}\n")
+
         # Step 3: Morphological cleanup
-        #cleaned = morphological_cleanup(binary)
+        cleaned = morphological_cleanup(binary)
+        print(f"Cleaned binary image: {cleaned.shape}")
+        print(f"Cleaned binary image stats - min: {cleaned.min()}, max: {cleaned.max()}, mean: {cleaned.mean():.2f}, std: {cleaned.std():.2f}")
+        print(f"Cleaned binary image: {cleaned}\n")
         
         # Step 4: Find largest component
-        #largest_component = find_largest_component(cleaned)
+        largest_component = find_largest_component(cleaned)
+        print(f"Largest component image: {largest_component.shape}")
+        print(f"Largest component stats - min: {largest_component.min()}, max: {largest_component.max()}, mean: {largest_component.mean():.2f}, std: {largest_component.std():.2f}")
+        print(f"Largest component: {largest_component}\n")
         
         # Step 5: Compute vertical edge projection
         projection = compute_vertical_edge_projection(binary)
+        print(f"Projection profile: {projection.shape}")
+        print(f"Projection stats - min: {projection.min()}, max: {projection.max()}, mean: {projection.mean():.2f}, std: {projection.std():.2f}")
+        print(f"Projection: {projection}\n")
         
         # Step 6: Find endpoints
         start_x, end_x = find_scale_bar_endpoints(projection, min_length, peak_prominence)
