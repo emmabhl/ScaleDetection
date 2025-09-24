@@ -62,7 +62,6 @@ psutil==5.9.8
 ptyprocess==0.7.0
 pure_eval==0.2.3
 py-cpuinfo==9.0.0
-pyarrow==21.0.0
 pycparser==2.22
 pygments==2.19.2
 pyparsing==3.0.9
