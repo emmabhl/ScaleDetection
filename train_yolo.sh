@@ -13,7 +13,8 @@
 module load gcc python opencv/4.12.0 cuda
 
 # Activate virtual environment
-source scale/bin/activate
+source ~/.bashrc
+source activate scale
 
 # Step 1: Get the data
 python src/get_data.py --path original1/scalebar-dataset --data_dir data
