@@ -14,7 +14,7 @@ module load python cuda
 
 # Activate virtual environment
 source ~/.bashrc
-source activate scale
+source miniconda/bin/activate scale
 
 # Step 1: Get the data
 python src/get_data.py --path original1/scalebar-dataset --data_dir data
