@@ -87,7 +87,7 @@ stack_data==0.6.3
 statsmodels==0.14.5
 sympy==1.14.0
 tifffile==2025.2.18
-torch==2.5.1
+#torch==2.5.1
 torchvision==0.20.1
 tornado==6.5.2
 tqdm==4.67.1
