@@ -46,7 +46,7 @@ multiprocess==0.70.16
 nest-asyncio==1.6.0
 networkx==3.5
 numpy==2.2.2
-onnxruntime#==1.22.0
+onnxruntime
 packaging==25.0
 parso==0.8.5
 patsy==1.0.1
@@ -87,7 +87,7 @@ stack_data==0.6.3
 statsmodels==0.14.5
 sympy==1.14.0
 tifffile==2025.2.18
-#torch==2.5.1
+# torch==2.5.1
 torchvision==0.20.1
 tornado==6.5.2
 tqdm==4.67.1
