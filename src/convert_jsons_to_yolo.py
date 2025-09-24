@@ -242,6 +242,7 @@ def convert_dataset(
     json_dir  = data_dir / 'jsons'
     image_dir = data_dir / 'images'
     label_dir = data_dir / 'labels'
+
     os.makedirs(label_dir, exist_ok=True)
 
     # Class mapping
