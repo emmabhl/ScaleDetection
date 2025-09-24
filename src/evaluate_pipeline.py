@@ -21,15 +21,6 @@ from dataclasses import dataclass
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try to import ultralytics for mAP calculation
-try:
-    from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics
-    ULTRALYTICS_AVAILABLE = True
-except ImportError:
-    ULTRALYTICS_AVAILABLE = False
-    print("Warning: Ultralytics not available for mAP calculation")
-
-
 @dataclass
 class DetectionResult:
     """Data class for detection results."""
