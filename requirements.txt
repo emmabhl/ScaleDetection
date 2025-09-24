@@ -8,7 +8,6 @@ yaml
 
 # Train YOLO
 ultralytics
-clearml
 
 # Image processing
 scipy
