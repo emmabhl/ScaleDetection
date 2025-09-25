@@ -10,11 +10,11 @@
 #SBATCH --open-mode=append
 
 # Load necessary modules
-module load python/3.12 cuda/12.3 arrow/21.0.0 opencv/4.12.0 
+module load python/3.12 cuda/12.6 arrow/21.0.0 opencv/4.12.0 
 
 # Activate virtual environment
 source ~/.bashrc
-source 
+source ~/scale/bin/activate
 
 # Step 1: Get the data
 python src/get_data.py --path original1/scalebar-dataset --data_dir data
