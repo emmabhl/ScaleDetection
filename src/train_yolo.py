@@ -33,23 +33,6 @@ Arguments:
     --clearml: Enable ClearML experiment tracking.
     --clearml_project: ClearML project name.
 """
-
-######### Monkey patch ClearML version parsing to ignore local suffixes #########
-import re
-import clearml.utilities.version as version
-
-_orig_init = version.Version.__init__
-
-def _patched_init(self, vstr: str):
-    # Remove Compute Canada local suffixes like "+computecanada"
-    vstr = re.sub(r"\+.*$", "", vstr)
-    print(f"Patched ClearML version string to: {vstr}")
-    return _orig_init(self, vstr)
-
-version.Version.__init__ = _patched_init
-
-################################################################################
-
 import os
 import argparse
 from typing import Dict, Any, Tuple
