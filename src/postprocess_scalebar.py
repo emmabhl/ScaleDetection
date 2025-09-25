@@ -63,7 +63,7 @@ def apply_local_thresholding(image, radius=15):
     Returns:
         binary: Binarized image with True for foreground and False for background.
     """
-    # Ensure image is uint8 for rank filters
+    p# Ensure image is uint8 for rank filters
     if image.dtype != np.uint8:
         img = (255 * (image - image.min()) / (image.ptp() + 1e-8)).astype(np.uint8)
     else:
