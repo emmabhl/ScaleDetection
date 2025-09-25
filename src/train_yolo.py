@@ -43,6 +43,7 @@ _orig_init = version.Version.__init__
 def _patched_init(self, vstr: str):
     # Remove Compute Canada local suffixes like "+computecanada"
     vstr = re.sub(r"\+.*$", "", vstr)
+    print(f"Patched ClearML version string to: {vstr}")
     return _orig_init(self, vstr)
 
 version.Version.__init__ = _patched_init

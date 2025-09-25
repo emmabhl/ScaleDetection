@@ -338,27 +338,36 @@ def main():
     IMAGES_DIR = DATA_DIR / "images"
     JSONS_DIR = DATA_DIR / "jsons"
     LABELS_DIR = DATA_DIR / "labels"
-    os.makedirs(LABELS_DIR, exist_ok=True)
 
-    # Count files
-    image_files = list(Path(IMAGES_DIR).glob("*.jpg"))
-    json_files = list(Path(JSONS_DIR).glob("*.json"))
+    # Check if already converted
+    if os.path.exists(LABELS_DIR) and os.listdir(LABELS_DIR):
+        print(f"Labels directory {LABELS_DIR} already exists and is not empty. Skipping conversion.")
+        yaml_path = DATA_DIR / 'data.yaml'
+    else:
 
-    print(f"Found {len(image_files)} image files")
-    print(f"Found {len(json_files)} JSON annotation files")
-    
-    # Convert dataset
-    yaml_path = convert_dataset(DATA_DIR, args.train_split)
-    
-    # Run validation if requested
-    if args.validate:
-        stats = validate_conversion(
-            LABELS_DIR / 'train',
-            sample_size=args.sample_size
-        )
-        print(f"Validation results:")
-        for key, value in stats.items():
-            print(f"  {key}: {value}")
+        os.makedirs(LABELS_DIR, exist_ok=True)
+
+        # Count files
+        image_files = list(Path(IMAGES_DIR).glob("*.jpg"))
+        json_files = list(Path(JSONS_DIR).glob("*.json"))
+
+        print(f"Found {len(image_files)} image files")
+        print(f"Found {len(json_files)} JSON annotation files")
+        
+        # Convert dataset
+        yaml_path = convert_dataset(DATA_DIR, args.train_split)
+        
+        # Run validation if requested
+        if args.validate:
+            stats = validate_conversion(
+                LABELS_DIR / 'train',
+                sample_size=args.sample_size
+            )
+            print(f"Validation results:")
+            for key, value in stats.items():
+                print(f"  {key}: {value}")
+
+    print(f"Dataset ready for YOLO training. Configuration file: {yaml_path}")
 
 
 if __name__ == "__main__":
