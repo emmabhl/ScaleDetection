@@ -266,8 +266,8 @@ def localize_scale_bar_endpoints(
     x, y, w, h = bbox
 
     # Increase ROI to include some context and ensure full scale bar is captured
-    hpad = int(0.1 * h)
-    vpad = int(0.1 * w)
+    hpad = int(0.05 * h)
+    vpad = int(0.05 * w)
     x = max(0, x - vpad)
     y = max(0, y - hpad)
     w = min(image.shape[1] - x, w + 2 * vpad)

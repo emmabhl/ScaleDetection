@@ -17,5 +17,5 @@ ultralytics==8.3.203
 # pip-only section from environment.yml
 clearml==2.0.2
 kagglehub==0.3.13
-paddleocr==3.2.0
+#paddleocr>=3.0
 pandas==2.2.3
