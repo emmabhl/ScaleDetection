@@ -3,11 +3,12 @@ import torch
 import os
 from PIL import Image
 from src.prompt import PROMPT_TEMPLATE
+import argparse
 
 
 def VLM_scale_detection(
-    filepath: str = "data/annot", 
-    output_folder: str = "outputs_vlm",
+    filepath: str, 
+    output_folder: str,
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct", 
     max_side: int = 1024
 ) -> None:
@@ -91,4 +92,17 @@ def VLM_scale_detection(
             
 
 if __name__ == "__main__":
-    VLM_scale_detection()
+    parser = argparse.ArgumentParser(description="VLM Scale Detection")
+    parser.add_argument("--filepath", type=str, default="data/annot", help="Path to the directory containing images")
+    parser.add_argument("--output_folder", type=str, default="outputs_vlm", help="Folder to save output JSON files")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-4B-Instruct", help="Pre-trained VLM model ID")
+    parser.add_argument("--max_side", type=int, default=1024, help="Maximum side length for image resizing")
+    
+    args = parser.parse_args()
+    
+    VLM_scale_detection(
+        filepath=args.filepath,
+        output_folder=args.output_folder,
+        model_id=args.model_id,
+        max_side=args.max_side
+    )
