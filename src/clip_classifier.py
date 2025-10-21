@@ -52,7 +52,7 @@ class ScaleBarClassifier:
         """
         ref_dir = Path(ref_dir)
         for category_dir in ref_dir.iterdir():
-            if not category_dir.is_dir():
+            if not category_dir.is_dir() or category_dir.name.startswith("."):
                 continue
             emb_path = self.embedding_dir / f"{category_dir.name}.pt"
             if emb_path.exists():
@@ -61,7 +61,8 @@ class ScaleBarClassifier:
             else:
                 print(f"Computing embeddings for {category_dir.name}...")
                 embs = []
-                for img_path in category_dir.glob("*"):
+                for img_path in category_dir.glob(f"*.jpg"):
+                    print(f"Processing {img_path}...")
                     embs.append(self.compute_image_embedding(img_path))
                 embs = torch.cat(embs, dim=0)
                 torch.save(embs, emb_path)

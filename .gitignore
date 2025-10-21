@@ -212,6 +212,7 @@ data_small/
 *.jpg
 atypical_examples/
 error_analysis*/
+outputs_vlm/
 
 # Models
 *.pt
