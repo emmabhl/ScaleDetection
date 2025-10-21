@@ -2,7 +2,7 @@ from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 import torch
 import os
 from PIL import Image
-from src.prompt import PROMPT_TEMPLATE
+from prompt import PROMPT_TEMPLATE
 import argparse
 
 
