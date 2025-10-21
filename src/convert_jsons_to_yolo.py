@@ -124,7 +124,8 @@ def convert_json_to_yolo(
                     # Skip if bbox is too small
                     if width > 0.001 and height > 0.001:
                         yolo_annotations.append(
-                            f"{class_mapping['scalebar']} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
+                            f"{class_mapping['scalebar']} \
+                                {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
                         )
                 except Exception as e:
                     print(f"Warning: Failed to process bar in {json_path}: {e}")
@@ -140,7 +141,8 @@ def convert_json_to_yolo(
                     # Skip if bbox is too small
                     if width > 0.001 and height > 0.001:
                         yolo_annotations.append(
-                            f"{class_mapping['scalelabel']} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
+                            f"{class_mapping['scalelabel']} \
+                                {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
                         )
                 except Exception as e:
                     print(f"Warning: Failed to process label in {json_path}: {e}")
@@ -189,19 +191,19 @@ def create_dataset_yaml(
     val_files = annotation_files[n_train:]
     
     # Create dataset structure
-    image_train_dir = data_dir / 'images' / 'train'
-    image_val_dir = data_dir / 'images' / 'val'
-    label_train_dir = data_dir / 'labels' / 'train'
-    label_val_dir = data_dir / 'labels' / 'val'
-    os.makedirs(image_train_dir, exist_ok=True)
-    os.makedirs(image_val_dir, exist_ok=True)
-    os.makedirs(label_train_dir, exist_ok=True)
-    os.makedirs(label_val_dir, exist_ok=True)
+    img_train_dir = data_dir / 'images' / 'train'
+    img_val_dir = data_dir / 'images' / 'val'
+    lab_train_dir = data_dir / 'labels' / 'train'
+    lab_val_dir = data_dir / 'labels' / 'val'
+    os.makedirs(img_train_dir, exist_ok=True)
+    os.makedirs(img_val_dir, exist_ok=True)
+    os.makedirs(lab_train_dir, exist_ok=True)
+    os.makedirs(lab_val_dir, exist_ok=True)
 
     dataset_config = {
         'path': os.path.relpath(data_dir),
-        'train': os.path.relpath(image_train_dir, start=data_dir),
-        'val': os.path.relpath(image_val_dir, start=data_dir),
+        'train': os.path.relpath(img_train_dir, start=data_dir),
+        'val': os.path.relpath(img_val_dir, start=data_dir),
         'test': None,
         'nc': len(class_mapping),
         'names': {v: k for k, v in class_mapping.items()}
@@ -210,12 +212,12 @@ def create_dataset_yaml(
     # Move files
     for txt_file in train_files:
         img_file = txt_file.replace('.txt', '.jpg')
-        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(image_train_dir, img_file))
-        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(label_train_dir, txt_file))
+        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(img_train_dir, img_file))
+        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(lab_train_dir, txt_file))
     for txt_file in val_files:
         img_file = txt_file.replace('.txt', '.jpg')
-        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(image_val_dir, img_file))
-        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(label_val_dir, txt_file))
+        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(img_val_dir, img_file))
+        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(lab_val_dir, txt_file))
 
     # Write YAML config
     with open(yaml_path, 'w') as f:
@@ -341,7 +343,7 @@ def main():
 
     # Check if already converted
     if os.path.exists(LABELS_DIR) and os.listdir(LABELS_DIR):
-        print(f"Labels directory {LABELS_DIR} already exists and is not empty. Skipping conversion.")
+        print(f"Labels directory {LABELS_DIR} already exists and is not empty. Skipping conversion")
         yaml_path = DATA_DIR / 'data.yaml'
     else:
 

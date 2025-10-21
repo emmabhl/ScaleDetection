@@ -210,10 +210,13 @@ __marimo__/
 data/
 data_small/
 *.jpg
+atypical_examples/
+error_analysis*/
 
 # Models
 *.pt
 models*/
+embeddings*/
 
 # Logs
 *logs*

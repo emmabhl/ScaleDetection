@@ -6,8 +6,8 @@ import json
 import cv2
 import numpy as np
 import math
-from typing import List, Tuple, Optional, Dict, Any
-from dataclasses import dataclass
+from typing import List, Tuple, Optional, Dict, Any, Union
+from dataclasses import dataclass, asdict, is_dataclass
 from ocr import OCRProcessor, LabelDetection
 from postprocess_scalebar import ScalebarProcessor, ScalebarDetection
 
@@ -15,10 +15,17 @@ from postprocess_scalebar import ScalebarProcessor, ScalebarDetection
 @dataclass
 class Scale:
     """Data class for matched scale bar and label."""
-    scalebar_length: float # in pixels
-    text_label: str
-    mm_per_pixel: Optional[float] = None
-    confidence: Optional[float] = None
+    scale_bar_found: bool
+    measured_scale_length: Optional[float] = None
+    declared_scale_length: Optional[float] = None
+    units: Optional[str] = None
+    pixel_to_mm_ratio: Optional[float] = None
+    orientation: Optional[str] = None
+    scale_bar_confidence: Optional[float] = None
+    #scale_length_uncertainty: Optional[float] = None
+    scale_length_flag: Optional[bool] = False
+    text_label_confidence: Optional[float] = None
+    orientation_confidence: Optional[float] = None
 
 
 class ScaleDetectionPipeline:
@@ -49,7 +56,7 @@ class ScaleDetectionPipeline:
 
     def process_yolo_detections(
             self, image: np.ndarray, yolo_results, image_name: str
-        ) -> Dict[str, Any]:
+        ) -> Union[Dict[str, Any], Scale]:
         """
         Process YOLO detection results to extract scale bars and text labels, then apply 
         post-processing and OCR to get the final scale.
@@ -60,7 +67,7 @@ class ScaleDetectionPipeline:
             image_name: Name of the image (for saving debug plots)
             
         Returns:
-            Dictionary containing results
+            Dictionary containing results or just Scale object
         """
         plot_path = os.path.join(self.debug_dir, f'{image_name}') if self.debug_dir else None
 
@@ -70,7 +77,16 @@ class ScaleDetectionPipeline:
         scores = yolo_results.boxes.conf.cpu().numpy()  # Confidence scores
 
         # Separate bar and label detections
-        bar_box, label_box = self.match_text_to_bars(boxes, classes, scores)
+        bar_box, label_box, bar_score, label_score = self.match_text_to_bars(boxes, classes, scores)
+        
+        if bar_score == 0.0 or label_score == 0.0:
+            return Scale(
+                scale_bar_found=False,
+                scale_bar_confidence=float(bar_score),
+                text_label_confidence=float(label_score),
+                orientation=None,
+                orientation_confidence=1.0
+            )
 
         # ---------- SCALEBAR DETECTION & MEASUREMENT ----------
         bar_box = self.prepare_bbox(image, bar_box, padding_percent=0.1)
@@ -85,21 +101,14 @@ class ScaleDetectionPipeline:
         )
 
         # ----------- MATCHING & RESULTS PREPARATION -----------
-        if scalebar_detection.confidence == 0.0 or label_detection.confidence == 0.0:
-            if scalebar_detection.confidence == 0.0:
-                print("No valid scale bar after post-processing.")
-            if label_detection.confidence == 0.0:
-                print("No valid text label after OCR.")
-            return {}
-        
-        scale = self.get_scale(scalebar_detection, label_detection)
+        scale = self.get_scale(scalebar_detection, label_detection, bar_score, label_score)
 
         results = {
             'scalebar_detection': scalebar_detection,
             'label_detection': label_detection,
             'scale': scale
         }
-        return results
+        return scale
 
     def prepare_bbox(
             self, image: np.ndarray, box: np.ndarray, padding_percent: float
@@ -131,7 +140,7 @@ class ScaleDetectionPipeline:
 
     def match_text_to_bars(
             self, boxes: np.ndarray, classes: np.ndarray, scores: np.ndarray
-        ) -> Tuple[np.ndarray, np.ndarray]:
+        ) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """
         Match text detections to scale bar detections.
 
@@ -141,7 +150,8 @@ class ScaleDetectionPipeline:
             scores: Array of confidence scores
 
         Returns:
-            Tuple of matched scale bar box and text label boxs in (x, y, w, h) format
+            Tuple of matched scale bar box and text label boxs in (x, y, w, h) format and their
+            confidence scores. If no match is found, returns ([0,0,0,0], [0,0,0,0], 0.0, 0.0).
         """
         # Helper functions
         def calculate_distance(point1: Tuple[float, float], point2: Tuple[float, float]) -> float:
@@ -156,6 +166,8 @@ class ScaleDetectionPipeline:
         # Separate bar and label detections
         bar_boxes = boxes[classes == 0]
         label_boxes = boxes[classes == 1]
+        bar_scores = scores[classes == 0]
+        label_scores = scores[classes == 1]
         
 
         if len(label_boxes) == 0 or len(bar_boxes) == 0:
@@ -163,7 +175,7 @@ class ScaleDetectionPipeline:
                 print("No text labels detected.")
             if len(bar_boxes) == 0:
                 print("No scale bars detected.")
-            return [0, 0, 0, 0], [0, 0, 0, 0]
+            return [0, 0, 0, 0], [0, 0, 0, 0], 0.0, 0.0
         
         elif len(label_boxes) == 1 and len(bar_boxes) == 1:
             # Check if the single text label is close enough to the single scale bar
@@ -176,55 +188,55 @@ class ScaleDetectionPipeline:
             max_distance = bar_diagonal * self.max_distance_ratio
             
             if distance <= max_distance:
-                return bar_boxes[0], label_boxes[0]
+                return bar_box, label_box, bar_scores[0], label_scores[0]
             else:
-                return [0, 0, 0, 0], [0, 0, 0, 0]
-
-        elif len(label_boxes) == 1:
-            # Match the single text label to the closest scale bar
-            label_box = label_boxes[0]
-            label_center = ((label_box[0] + label_box[2]) / 2, (label_box[1] + label_box[3]) / 2)
-
-            best_match = None
-            best_distance = float('inf')
-            for bar in bar_boxes:
-                bar_center = ((bar[0] + bar[2]) / 2, (bar[1] + bar[3]) / 2)
-                distance = calculate_distance(label_center, bar_center)
-                bar_diagonal = calculate_bar_diagonal(bar)
-                max_distance = bar_diagonal * self.max_distance_ratio
-                
-                if distance < best_distance and distance <= max_distance:
-                    best_match = bar
-                    best_distance = distance
-
-            return best_match, label_box
+                return [0, 0, 0, 0], [0, 0, 0, 0], 0.0, 0.0
 
         else:
-            # Multiple labels and scale bars, take the most confident bar and match to closest label
-            bar_box = bar_boxes[np.argmax(scores[classes == 0])]
-            bar_center = ((bar_box[0] + bar_box[2]) / 2, (bar_box[1] + bar_box[3]) / 2)
-            bar_diagonal = calculate_bar_diagonal(bar_box)
-            max_distance = bar_diagonal * self.max_distance_ratio
-
-            best_match = None
-            best_distance = float('inf')
-            for label in label_boxes:
-                label_center = ((label[0] + label[2]) / 2, (label[1] + label[3]) / 2)
-                distance = calculate_distance(label_center, bar_center)
-
-                if distance < best_distance and distance <= max_distance:
-                    best_match = label
-                    best_distance = distance
-
-            return bar_box, best_match
+            # Multiple bars and labels: check if the most confident ones are close enough
+            sorted_bar_indices = np.argsort(-bar_scores)
+            sorted_label_indices = np.argsort(-label_scores)
+            for label_idx in sorted_label_indices:
+                label_box = label_boxes[label_idx]
+                label_center = ((label_box[0] + label_box[2]) / 2, (label_box[1] + label_box[3]) / 2)
+                for bar_idx in sorted_bar_indices:
+                    bar_box = bar_boxes[bar_idx]
+                    bar_center = ((bar_box[0] + bar_box[2]) / 2, (bar_box[1] + bar_box[3]) / 2)
+                    bar_diagonal = calculate_bar_diagonal(bar_box)
+                    max_distance = bar_diagonal * self.max_distance_ratio
+                    distance = calculate_distance(label_center, bar_center)
+                    
+                    if distance <= max_distance:
+                        return bar_box, label_box, bar_scores[bar_idx], label_scores[label_idx]
+            return [0, 0, 0, 0], [0, 0, 0, 0], 0.0, 0.0
 
 
     def get_scale(
-        self, scalebar_detection: ScalebarDetection, label_detection: LabelDetection,
+        self, 
+        scalebar_detection: ScalebarDetection, 
+        label_detection: LabelDetection,
+        bar_score: float, 
+        label_score: float
     ) -> Scale:
         """
         Get the scale from the detected scale bar and recognized label.
         """
+        if (scalebar_detection.pixel_length is None) or \
+            (scalebar_detection.pixel_length == 0) or \
+            (label_detection.confidence == 0.0):
+            return Scale(
+                scale_bar_found=False,
+                measured_scale_length=float(scalebar_detection.pixel_length),
+                declared_scale_length=float(label_detection.parsed_value),
+                units=label_detection.normalized_unit,
+                pixel_to_mm_ratio=0.0,
+                scale_bar_confidence=float(bar_score),
+                #scale_length_uncertainty=float(scalebar_detection.uncertainty),
+                scale_length_flag=scalebar_detection.flag,
+                text_label_confidence=float(label_score),
+                orientation_confidence=1.0
+            )
+        
         if label_detection.normalized_unit == 'mm':
             mm_per_pixel = label_detection.parsed_value / scalebar_detection.pixel_length
         elif label_detection.normalized_unit == 'cm':
@@ -234,35 +246,35 @@ class ScaleDetectionPipeline:
         elif label_detection.normalized_unit == 'nm':
             mm_per_pixel = (label_detection.parsed_value / 1e6) / scalebar_detection.pixel_length
         else:
-            mm_per_pixel = None
-    
+            mm_per_pixel = 0.0
+                            
         return Scale(
-            scalebar_length=scalebar_detection.pixel_length,
-            text_label=label_detection.text,
-            mm_per_pixel=mm_per_pixel,
-            confidence=min(scalebar_detection.confidence, label_detection.confidence)
+            scale_bar_found=bool(mm_per_pixel > 0.0),
+            measured_scale_length=float(scalebar_detection.pixel_length),
+            declared_scale_length=float(label_detection.parsed_value),
+            units=label_detection.normalized_unit,
+            pixel_to_mm_ratio=float(mm_per_pixel),
+            #orientation=metadata.orientation,
+            scale_bar_confidence=float(bar_score),
+            #scale_length_uncertainty=float(scalebar_detection.uncertainty),
+            text_label_confidence=float(label_score),
+            orientation_confidence=float(1.0)
         )
 
     
-    def save_results(self, results: Dict[str, Any], output_path: str) -> None:
+    def save_results(self, results: Scale, output_path: str) -> None:
         """
         Save results to JSON file.
         
         Args:
-            results: Results dictionary
+            results: Scale object containing the results
             output_path: Path to save JSON file
         """
-        # Convert results to JSON-serializable format
-        def serialize(obj):
-            if isinstance(obj, (ScalebarDetection, LabelDetection, Scale)):
-                return obj.__dict__
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            raise TypeError("Type not serializable")
-        
-        # Save to JSON
+        if not is_dataclass(results):
+            raise TypeError("Expected a dataclass instance of type Scale.")
+
         with open(output_path, 'w') as f:
-            json.dump(results, f, default=serialize, indent=4)
+            json.dump(asdict(results), f, indent=4)
 
 
 def main():
@@ -280,7 +292,7 @@ def main():
                        help='Minimum confidence for text detection')
     parser.add_argument('--max_distance', type=float, default=1.5,
                        help='Maximum distance ratio for text-bar matching')
-    parser.add_argument('--yolo_conf', type=float, default=0.15,
+    parser.add_argument('--yolo_conf', type=float, default=0.01,
                        help='YOLO confidence threshold for detections')
     parser.add_argument('--ocr_version', type=str, default='PP-OCRv5',
                        help='Version of OCR model for text recognition')
@@ -321,11 +333,5 @@ def main():
     # Save results
     pipeline.save_results(results, args.output_dir + f'/{image_name}.json')
     
-    # Print summary
-    print(f"Processed image: {args.image}")
-    print(f"Label detections: {results.get('label_detection')}")
-    print(f"Scalebar detections: {results.get('scalebar_detection')}")
-    print(f"Final scale: {results.get('scale')}")
-
 if __name__ == "__main__":
     main()
