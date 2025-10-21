@@ -2,7 +2,7 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=0:10:00
+#SBATCH --time=0:20:00
 #SBATCH --job-name=VLM_scale_detection
 #SBATCH --output=slogs/%x_%A-%a_%n-%t.out
                             # %x=job-name, %A=job ID, %a=array value, %n=node rank, %t=task rank, %N=hostname

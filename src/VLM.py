@@ -4,6 +4,7 @@ import os
 from PIL import Image
 from prompt import PROMPT_TEMPLATE
 import argparse
+from tqdm import tqdm
 
 
 def VLM_scale_detection(
@@ -38,7 +39,7 @@ def VLM_scale_detection(
             new_w = int(w * (max_side / h))
         return pil_img.resize((new_w, new_h), resample=Image.LANCZOS)
 
-    for filename in os.listdir(filepath):
+    for filename in tqdm(os.listdir(filepath)):
         if not (filename.endswith(".png") or filename.endswith(".jpg")):
             continue
 
@@ -47,7 +48,6 @@ def VLM_scale_detection(
 
         # Resize to limit memory footprint (important!)
         image = resize_max_side(image, max_side)
-        print(f"{filename} resized -> {image.size}")
 
         # Build messages same as before (image inserted by processor)
         messages = [
@@ -85,6 +85,7 @@ def VLM_scale_detection(
         
         # Save the output in a json file in a new folder "outputs_vlm"
         os.makedirs(output_folder, exist_ok=True)
+        filename = filename.removesuffix(".jpg").removesuffix(".png")
         output_path = os.path.join(output_folder, filename + ".json")
         with open(output_path, "w") as f:
             import json
