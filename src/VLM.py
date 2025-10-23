@@ -5,13 +5,14 @@ from PIL import Image
 from prompt import PROMPT_TEMPLATE
 import argparse
 from tqdm import tqdm
+import json
 
 
 def VLM_scale_detection(
     filepath: str, 
     output_folder: str,
-    model_id: str = "Qwen/Qwen3-VL-4B-Instruct", 
-    max_side: int = 1024
+    model_id: str = "Qwen/Qwen3-VL-8B-Thinking", 
+    max_side: int = 2048
 ) -> None:
     """
     Perform scale detection using a Vision-Language Model (VLM).
@@ -71,7 +72,7 @@ def VLM_scale_detection(
 
         # Generate output
         with torch.no_grad():
-            generated_ids = model.generate(**inputs, max_new_tokens=128)
+            generated_ids = model.generate(**inputs)
 
         # Trim prompt portion correctly using sequence lengths
         input_ids = inputs["input_ids"]
@@ -82,13 +83,14 @@ def VLM_scale_detection(
         output_text = processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )[0]
+        # Transform output text to dictionary
+        output_text = json.loads(output_text)
         
         # Save the output in a json file in a new folder "outputs_vlm"
         os.makedirs(output_folder, exist_ok=True)
         filename = filename.removesuffix(".jpg").removesuffix(".png")
         output_path = os.path.join(output_folder, filename + ".json")
         with open(output_path, "w") as f:
-            import json
             json.dump(output_text, f, indent=2)
             
 
@@ -96,8 +98,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VLM Scale Detection")
     parser.add_argument("--filepath", type=str, default="data/annot", help="Path to the directory containing images")
     parser.add_argument("--output_folder", type=str, default="outputs_vlm", help="Folder to save output JSON files")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-4B-Instruct", help="Pre-trained VLM model ID")
-    parser.add_argument("--max_side", type=int, default=1024, help="Maximum side length for image resizing")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-8B-Thinking", help="Pre-trained VLM model ID")
+    parser.add_argument("--max_side", type=int, default=2048, help="Maximum side length for image resizing")
     
     args = parser.parse_args()
     

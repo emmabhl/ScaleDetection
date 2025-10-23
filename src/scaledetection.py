@@ -8,9 +8,9 @@ import numpy as np
 import math
 from typing import List, Tuple, Optional, Dict, Any, Union
 from dataclasses import dataclass, asdict, is_dataclass
-from ocr import OCRProcessor, LabelDetection
+from classifier import ScaleBarClassifier
 from postprocess_scalebar import ScalebarProcessor, ScalebarDetection
-
+from ocr import OCRProcessor, LabelDetection
 
 @dataclass
 class Scale:
@@ -292,6 +292,8 @@ def main():
                        help='Minimum confidence for text detection')
     parser.add_argument('--max_distance', type=float, default=1.5,
                        help='Maximum distance ratio for text-bar matching')
+    parser.add_argument('--classification_threshold', type=float, default=0.42,
+                       help='Threshold for scale bar image classification')
     parser.add_argument('--yolo_conf', type=float, default=0.01,
                        help='YOLO confidence threshold for detections')
     parser.add_argument('--ocr_version', type=str, default='PP-OCRv5',
@@ -310,28 +312,42 @@ def main():
     # Prepare output directory
     image_name = os.path.splitext(os.path.basename(args.image))[0]
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Classify image type (optional)
+    clf = ScaleBarClassifier(reference_dir='atypical_examples')
+    result = clf.classify_image(image, threshold=args.classification_threshold)
+    
+    if result['predicted_category'] == 'normal':
+        # Initialize pipeline
+        pipeline = ScaleDetectionPipeline(
+            max_distance_ratio=args.max_distance,
+            ocr_version=args.ocr_version,
+            debug_dir=args.output_dir if args.plot_debug else None,
+        )
+
+        # Use YOLO model for detection
+        model = YOLO(args.model)
+        # yolo_results = model.predict(source=image, imgsz=(image.shape[1], image.shape[0]), conf=0.4, device='mps', half=True, save_conf=True)
+        yolo_results = model.predict(image, conf=args.yolo_conf, verbose=False)
+
+        # Save YOLO detection visualization
+        if args.plot_debug:
+            yolo_results[0].save(args.output_dir + f'/{image_name}_yolo.jpg')
+
+        # Process YOLO detections
+        results = pipeline.process_yolo_detections(image, yolo_results[0], image_name)
         
-    # Initialize pipeline
-    pipeline = ScaleDetectionPipeline(
-        max_distance_ratio=args.max_distance,
-        ocr_version=args.ocr_version,
-        debug_dir=args.output_dir if args.plot_debug else None,
-    )
-
-    # Use YOLO model for detection
-    model = YOLO(args.model)
-    # yolo_results = model.predict(source=image, imgsz=(image.shape[1], image.shape[0]), conf=0.4, device='mps', half=True, save_conf=True)
-    yolo_results = model.predict(image, conf=args.yolo_conf, verbose=False)
-
-    # Save YOLO detection visualization
-    if args.plot_debug:
-        yolo_results[0].save(args.output_dir + f'/{image_name}_yolo.jpg')
-
-    # Process YOLO detections
-    results = pipeline.process_yolo_detections(image, yolo_results[0], image_name)
+        # Save results
+        pipeline.save_results(results, args.output_dir + f'/{image_name}.json')
+        
+    elif result['predicted_category'] == 'graduation_middleunit':
+        print("Graduation middle unit scale bars are not yet supported.")
     
-    # Save results
-    pipeline.save_results(results, args.output_dir + f'/{image_name}.json')
-    
+    elif result['predicted_category'] == 'ruler_photo':
+        print("Ruler in photo scale bars are not yet supported.")
+        
+    else:
+        print("Scale bar type not yet supported.")
+        
 if __name__ == "__main__":
     main()

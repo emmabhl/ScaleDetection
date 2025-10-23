@@ -212,7 +212,7 @@ data_small/
 *.jpg
 atypical_examples/
 error_analysis*/
-outputs_vlm/
+classification examples/
 
 # Models
 *.pt
@@ -225,3 +225,4 @@ embeddings*/
 
 # Outputs
 outputs/
+outputs_vlm/
