@@ -11,8 +11,8 @@ import json
 def VLM_scale_detection(
     filepath: str, 
     output_folder: str,
-    model_id: str = "Qwen/Qwen3-VL-8B-Thinking", 
-    max_side: int = 2048
+    model_id: str, 
+    max_side: int
 ) -> None:
     """
     Perform scale detection using a Vision-Language Model (VLM).
@@ -82,7 +82,8 @@ def VLM_scale_detection(
         generated_ids_trimmed = generated_ids[:, seq_lens:]
         output_text = processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )[0]
+        )
+        print(f"Output for {filename}:\n{output_text}\n")
         # Transform output text to dictionary
         output_text = json.loads(output_text)
         

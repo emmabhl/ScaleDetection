@@ -2,7 +2,7 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=0:20:00
+#SBATCH --time=0:30:00
 #SBATCH --job-name=VLM_scale_detection
 #SBATCH --output=slogs/%x_%A-%a_%n-%t.out
                             # %x=job-name, %A=job ID, %a=array value, %n=node rank, %t=task rank, %N=hostname
@@ -17,4 +17,4 @@ source ~/.bashrc
 source ~/scale/bin/activate
 
 # Run the VLM scale detection script
-python src/VLM.py --filepath data/annot --output_folder outputs_vlm --model_id Qwen/Qwen3-VL-4B-Instruct --max_side 1024
+python src/VLM.py --filepath data/annot --output_folder outputs_vlm --model_id Qwen/Qwen3-VL-8B-Thinking --max_side 2048
