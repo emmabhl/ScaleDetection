@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --gres=gpu:h100:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --time=0:30:00
 #SBATCH --job-name=VLM_scale_detection
 #SBATCH --output=slogs/%x_%A-%a_%n-%t.out
