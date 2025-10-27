@@ -99,7 +99,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VLM Scale Detection")
     parser.add_argument("--filepath", type=str, default="data/annot", help="Path to the directory containing images")
     parser.add_argument("--output_folder", type=str, default="outputs_vlm", help="Folder to save output JSON files")
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-8B-Thinking", help="Pre-trained VLM model ID")
+    parser.add_argument("--model_id", type=str, default="Qwen/Qwen3-VL-8B-Instruct", help="Pre-trained VLM model ID")
     parser.add_argument("--max_side", type=int, default=2048, help="Maximum side length for image resizing")
     
     args = parser.parse_args()

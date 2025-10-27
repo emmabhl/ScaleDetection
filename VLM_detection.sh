@@ -17,4 +17,4 @@ source ~/.bashrc
 source ~/scale/bin/activate
 
 # Run the VLM scale detection script
-python src/VLM.py --filepath data/annot --output_folder outputs_vlm --model_id Qwen/Qwen3-VL-8B-Thinking --max_side 2048
+python src/VLM.py --filepath data/annot --output_folder outputs_vlm --model_id Qwen/Qwen3-VL-8B-Instruct --max_side 2048
