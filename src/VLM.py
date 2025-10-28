@@ -80,7 +80,14 @@ def VLM_scale_detection(
 
         # Generate output
         with torch.no_grad():
-            generated_ids = model.generate(**inputs)
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=512,          # increase generation length
+                temperature=0.2,             # make it deterministic
+                do_sample=False,             # disable sampling for structured output
+                eos_token_id=processor.tokenizer.eos_token_id,
+                pad_token_id=processor.tokenizer.pad_token_id,
+            )
 
         # Trim prompt portion correctly using sequence lengths
         input_ids = inputs["input_ids"]
