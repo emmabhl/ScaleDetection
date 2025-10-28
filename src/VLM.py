@@ -92,8 +92,10 @@ def VLM_scale_detection(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
         print(f"Output for {filename}:\n{output_text}\n")
+        print("-" * 50)
+        print(f'Output for {filename}:\n{output_text[0]}\n')
         # Transform output text to dictionary
-        output_text = json.loads(output_text)
+        output_text = json.loads(output_text[0])
         
         # Save the output in a json file in a new folder "outputs_vlm"
         os.makedirs(output_folder, exist_ok=True)
