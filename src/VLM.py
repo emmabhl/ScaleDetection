@@ -24,8 +24,16 @@ def VLM_scale_detection(
     """
     
     # Load model (with lower-precision to save memory)
-    model = Qwen3VLForConditionalGeneration.from_pretrained(model_id, device_map="auto", dtype=torch.float16)
-    processor = AutoProcessor.from_pretrained(model_id)
+    model = Qwen3VLForConditionalGeneration.from_pretrained(
+        model_id, 
+        cache_dir="~/scratch/eboehly/hf_cache",
+        device_map="auto", 
+        dtype=torch.float16
+    )
+    processor = AutoProcessor.from_pretrained(
+        model_id,
+        cache_dir="~/scratch/eboehly/hf_cache"
+    )
 
     def resize_max_side(pil_img: Image.Image, max_side: int):
         w, h = pil_img.size
