@@ -81,13 +81,13 @@ def VLM_scale_detection(
         # Generate output
         with torch.no_grad():
             generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=512,          # increase generation length
-                temperature=0.2,             # make it deterministic
-                do_sample=False,             # disable sampling for structured output
-                eos_token_id=processor.tokenizer.eos_token_id,
-                pad_token_id=processor.tokenizer.pad_token_id,
-            )
+            **inputs,
+            max_new_tokens=1024,               # was 512 — double it for long JSONs
+            temperature=0.0,                   # deterministic
+            do_sample=False,
+            eos_token_id=processor.tokenizer.eos_token_id,
+            pad_token_id=processor.tokenizer.pad_token_id,
+        )
 
         # Trim prompt portion correctly using sequence lengths
         input_ids = inputs["input_ids"]
@@ -97,13 +97,13 @@ def VLM_scale_detection(
         generated_ids_trimmed = generated_ids[:, seq_lens:]
         output_text = processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )
+        )[0]
         print(f"Output for {filename}:\n{output_text}\n")
-        print("-" * 50)
-        print(f'Output for {filename}:\n{output_text[0]}\n')
+        output_text = output_text.split("<END_JSON>")[0].strip()
+        print(f'Output for {filename}:\n{output_text}\n')
         # Transform output text to dictionary
-        output_text = json.loads(output_text[0])
-        
+        output_text = json.loads(output_text)
+
         # Save the output in a json file in a new folder "outputs_vlm"
         os.makedirs(output_folder, exist_ok=True)
         filename = filename.removesuffix(".jpg").removesuffix(".png")
