@@ -41,6 +41,7 @@ class ScaleBarClassifier:
             torch.Tensor: The normalized image embedding.
         """
         image = Image.fromarray(image).convert("RGB")
+        
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             # Extract features from the model
@@ -69,7 +70,9 @@ class ScaleBarClassifier:
                 self.known_embs[category_dir.name] = torch.load(emb_path, map_location=self.device)
             else:
                 embs = []
-                for img_path in category_dir.glob("*.jpg"):
+                for img_path in category_dir.iterdir():
+                    if not img_path.is_file() or img_path.name.startswith("."):
+                        continue
                     embs.append(self.compute_image_embedding(img_path))
                     embs.append(self.compute_image_embedding(img_path))
                 if len(embs) == 1:

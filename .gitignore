@@ -224,5 +224,4 @@ embeddings*/
 .DS_Store
 
 # Outputs
-outputs/
-outputs_vlm/
+outputs*/

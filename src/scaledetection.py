@@ -26,6 +26,7 @@ class Scale:
     scale_length_flag: Optional[bool] = False
     text_label_confidence: Optional[float] = None
     orientation_confidence: Optional[float] = None
+    type_: str = "normal"  # normal, graduation_middleunit, ruler_photo, atypical
 
 
 class ScaleDetectionPipeline:
