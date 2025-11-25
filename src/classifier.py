@@ -26,18 +26,19 @@ import numpy as np
 
 from precompute_ORB_descriptors import main as precompute_ORB_descriptors
 
+
 class ScaleBarClassifier:
     """
     Encapsulates the scale-bar template matching pipeline from the provided script.
 
     Args
         - score_threshold (float): Minimum score threshold to report a match (default 0.15).
-        - nfeatures (int): Number of ORB features to create (used when computing descriptors for a 
+        - nfeatures (int): Number of ORB features to create (used when computing descriptors for a
             target image) (default 1000).
         - ratio_thresh (float): Lowe's ratio test threshold (default 0.75).
-        - min_match_count (int): Minimum number of good matches required to attempt homography 
+        - min_match_count (int): Minimum number of good matches required to attempt homography
             (default 10).
-        - atypical_data_path (Optional[str]): If precomputed_dir does not exist, this directory 
+        - atypical_data_path (Optional[str]): If precomputed_dir does not exist, this directory
             is used to compute and save templates.
     """
 
@@ -56,7 +57,9 @@ class ScaleBarClassifier:
         self.min_match_count = min_match_count
 
         # ORB + BFMatcher (knn + ratio test)
-        self.orb = cv2.ORB_create(nfeatures=self.nfeatures) # pyright: ignore[reportAttributeAccessIssue]
+        self.orb = cv2.ORB_create(
+            nfeatures=self.nfeatures
+        )  # pyright: ignore[reportAttributeAccessIssue]
         self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
         # Loaded templates (dict: scale_type -> list of template_info dicts)
@@ -68,11 +71,9 @@ class ScaleBarClassifier:
                 raise ValueError(
                     "precomputed_dir does not exist and no atypical_data_path path provided."
                 )
-            
+
             precompute_ORB_descriptors(
-                atypical_data_path, 
-                self.precomputed_dir, 
-                nfeatures=self.nfeatures
+                atypical_data_path, self.precomputed_dir, nfeatures=self.nfeatures
             )
             self.load_templates()
 
@@ -83,7 +84,9 @@ class ScaleBarClassifier:
             None: Populates `self.templates_per_type` with loaded template lists.
         """
         if not os.path.isdir(self.precomputed_dir):
-            raise FileNotFoundError(f"Precomputed directory not found: {self.precomputed_dir}")
+            raise FileNotFoundError(
+                f"Precomputed directory not found: {self.precomputed_dir}"
+            )
 
         for fname in os.listdir(self.precomputed_dir):
             if fname.endswith(".pkl"):
@@ -117,7 +120,9 @@ class ScaleBarClassifier:
         ]
         return kps
 
-    def classify_scale_bar(self, target_image: np.ndarray) -> Optional[List[Dict[str, Any]]]:
+    def classify_scale_bar(
+        self, target_image: np.ndarray
+    ) -> Optional[List[Dict[str, Any]]]:
         """Classify an image by matching ORB descriptors against templates.
 
         Args:
@@ -165,12 +170,16 @@ class ScaleBarClassifier:
 
                 if len(good_matches) >= self.min_match_count:
                     # Prepare points for homography
-                    src_pts = np.array(
-                        [kp1[m.queryIdx].pt for m in good_matches]
-                    ).astype(np.float32).reshape(-1, 1, 2)
-                    dst_pts = np.array(
-                        [kp2[m.trainIdx].pt for m in good_matches]
-                    ).astype(np.float32).reshape(-1, 1, 2)
+                    src_pts = (
+                        np.array([kp1[m.queryIdx].pt for m in good_matches])
+                        .astype(np.float32)
+                        .reshape(-1, 1, 2)
+                    )
+                    dst_pts = (
+                        np.array([kp2[m.trainIdx].pt for m in good_matches])
+                        .astype(np.float32)
+                        .reshape(-1, 1, 2)
+                    )
 
                     M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 4.0)
                     if M is not None and mask is not None:
@@ -183,9 +192,11 @@ class ScaleBarClassifier:
                         if score > best_score:
                             best_score = score
                             h, w = template_info["image_shape"]
-                            pts = np.array(
-                                [[0, 0], [w, 0], [w, h], [0, h]]
-                            ).astype(np.float32).reshape(-1, 1, 2)
+                            pts = (
+                                np.array([[0, 0], [w, 0], [w, h], [0, h]])
+                                .astype(np.float32)
+                                .reshape(-1, 1, 2)
+                            )
                             dst = cv2.perspectiveTransform(pts, M)
                             best_bbox = dst
                             best_template_fname = template_info["filename"]
@@ -194,19 +205,32 @@ class ScaleBarClassifier:
                     dst_pts = np.array(
                         [kp2[m.trainIdx].pt for m in good_matches]
                     ).astype(np.float32)
-                    x_min, y_min = float(dst_pts[:, 0].min()), float(dst_pts[:, 1].min())
-                    x_max, y_max = float(dst_pts[:, 0].max()), float(dst_pts[:, 1].max())
+                    x_min, y_min = float(dst_pts[:, 0].min()), float(
+                        dst_pts[:, 1].min()
+                    )
+                    x_max, y_max = float(dst_pts[:, 0].max()), float(
+                        dst_pts[:, 1].max()
+                    )
                     score = len(good_matches) / len(kp1) if len(kp1) > 0 else 0.0
                     if score > best_score:
                         best_score = score
                         best_bbox = np.array(
-                            [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]],
+                            [
+                                [x_min, y_min],
+                                [x_max, y_min],
+                                [x_max, y_max],
+                                [x_min, y_max],
+                            ],
                             dtype=np.float32,
                         ).reshape(-1, 1, 2)
                         best_template_fname = template_info["filename"]
 
             if best_score > self.score_threshold:
-                best_bbox = best_bbox.reshape(-1, 2).astype(int) if best_bbox is not None else None
+                best_bbox = (
+                    best_bbox.reshape(-1, 2).astype(int)
+                    if best_bbox is not None
+                    else None
+                )
 
                 results.append(
                     {
@@ -221,12 +245,11 @@ class ScaleBarClassifier:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
-
     def save_results(
-        self, 
-        target_img: np.ndarray, 
-        matches: Optional[List[Dict[str, Any]]], 
-        save_path: Optional[str] = None
+        self,
+        target_img: np.ndarray,
+        matches: Optional[List[Dict[str, Any]]],
+        save_path: Optional[str] = None,
     ) -> None:
         """Visualize and optionally save classification overlay on the image.
 
@@ -239,22 +262,34 @@ class ScaleBarClassifier:
             None: Displays or writes an image depending on `save_path`.
         """
         if matches is None or len(matches) == 0:
-                return
+            return
         try:
             cm = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
             for i, m in enumerate(matches):
-                log.info(f"{m['template']}, Type: {m['scale_type']}, Score: {m['score']:.2f}")
-                bbox = m['bbox']
+                log.info(
+                    f"{m['template']}, Type: {m['scale_type']}, Score: {m['score']:.2f}"
+                )
+                bbox = m["bbox"]
                 if bbox is not None:
                     # Draw bounding box on image for visualization
                     bbox_pts = bbox
                     cv2.polylines(
-                        target_img, [bbox_pts.reshape(-1,2)], 
-                        isClosed=True, color=cm[i % len(cm)], thickness=2
+                        target_img,
+                        [bbox_pts.reshape(-1, 2)],
+                        isClosed=True,
+                        color=cm[i % len(cm)],
+                        thickness=2,
                     )
                     legend = f"{m['scale_type']} ({m['score']:.2f})"
-                    cv2.putText(target_img, legend, (bbox_pts[0][0], bbox_pts[0][1]-10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, cm[i % len(cm)], 2)
+                    cv2.putText(
+                        target_img,
+                        legend,
+                        (bbox_pts[0][0], bbox_pts[0][1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        cm[i % len(cm)],
+                        2,
+                    )
 
             if save_path:
                 plt.imshow(cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB))

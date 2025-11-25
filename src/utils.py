@@ -2,7 +2,7 @@
 Utility helpers
 
 Small helpers used across the project. Currently includes:
-- `ensure_model_available(local_path, repo_id, filename)`: ensure a model file exists locally and 
+- `ensure_model_available(local_path, repo_id, filename)`: ensure a model file exists locally and
     download it from Hugging Face if needed.
 
 Example usage:

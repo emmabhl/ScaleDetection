@@ -28,20 +28,23 @@ from skimage.filters import threshold_local
 @dataclass
 class ScalebarDetection:
     """Data class for scale bar detection results."""
+
     bbox: Tuple[int, int, int, int]  # (x, y, w, h)
     pixel_length: Optional[float] = None
     endpoints: Optional[List[Tuple[float, float]]] = None
     flag: Optional[bool] = False
-    #uncertainty: Optional[float] = None
+    # uncertainty: Optional[float] = None
 
 
 class ScalebarProcessor:
     """Class for post-processing scale bar detection results."""
 
     def localize_scalebar_endpoints(
-            self, image: np.ndarray, bbox: Tuple[int, int, int, int], 
-            plot_path: Optional[str] = None
-        ) -> ScalebarDetection:
+        self,
+        image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        plot_path: Optional[str] = None,
+    ) -> ScalebarDetection:
         """Localize scale bar endpoints within a bounding box
 
         Args:
@@ -55,11 +58,11 @@ class ScalebarProcessor:
         x, y, w, h = bbox
 
         # Extract ROI
-        roi = image[y:y+h, x:x+w]
+        roi = image[y : y + h, x : x + w]
 
         if roi.size == 0:
             return ScalebarDetection(
-                bbox=bbox, pixel_length=0.0, endpoints=None#, uncertainty=0.0
+                bbox=bbox, pixel_length=0.0, endpoints=None  # , uncertainty=0.0
             )
 
         try:
@@ -80,30 +83,36 @@ class ScalebarProcessor:
             skeleton = self.skeletonize(largest_comp)
 
             # Step 6: Find endpoints
-            start, end = self.find_endpoints(skeleton) # For horizontal scalebar
+            start, end = self.find_endpoints(skeleton)  # For horizontal scalebar
 
             # Step 7: Compute pixel length
             pixel_length = self.compute_flat_distance(start, end)
 
             if plot_path is not None:
                 self.visualize_endpoint_detection(
-                    image, 
-                    (x, y, w, h), 
+                    image,
+                    (x, y, w, h),
                     {
-                        'pixel_length': pixel_length, 'best_channel': best_channel, 
-                        'binary_image': binary, 'cleaned_image': cleaned, 
-                        'largest_comp': largest_comp, 'skeleton': skeleton,
-                        'endpoints': [(start[1]+x, start[0]+y), (end[1]+x, end[0]+y)]
+                        "pixel_length": pixel_length,
+                        "best_channel": best_channel,
+                        "binary_image": binary,
+                        "cleaned_image": cleaned,
+                        "largest_comp": largest_comp,
+                        "skeleton": skeleton,
+                        "endpoints": [
+                            (start[1] + x, start[0] + y),
+                            (end[1] + x, end[0] + y),
+                        ],
                     },
-                    save_path=plot_path + '_scalebar.png'
+                    save_path=plot_path + "_scalebar.png",
                 )
 
             return ScalebarDetection(
                 bbox=bbox,
                 pixel_length=pixel_length,
-                endpoints=[(start[1]+x, start[0]+y), (end[1]+x, end[0]+y)],
-                #uncertainty=0.0 # Placeholder for uncertainty estimation,
-                flag=True if pixel_length < 0.75 * max(w, h) else False
+                endpoints=[(start[1] + x, start[0] + y), (end[1] + x, end[0] + y)],
+                # uncertainty=0.0 # Placeholder for uncertainty estimation,
+                flag=True if pixel_length < 0.75 * max(w, h) else False,
             )
 
         except Exception as e:
@@ -111,23 +120,26 @@ class ScalebarProcessor:
 
             if plot_path is not None:
                 self.visualize_endpoint_detection(
-                    image, 
-                    (x, y, w, h), 
+                    image,
+                    (x, y, w, h),
                     {
-                        'pixel_length': 0.0, 
-                        'best_channel': best_channel if 'best_channel' in locals() else None,
-                        'binary_image': binary if 'binary' in locals() else None,
-                        'cleaned_image': cleaned if 'cleaned' in locals() else None,
-                        'largest_comp': largest_comp if 'largest_comp' in locals() else None,
-                        'skeleton': skeleton if 'skeleton' in locals() else None,
-                        'endpoints': None
+                        "pixel_length": 0.0,
+                        "best_channel": (
+                            best_channel if "best_channel" in locals() else None
+                        ),
+                        "binary_image": binary if "binary" in locals() else None,
+                        "cleaned_image": cleaned if "cleaned" in locals() else None,
+                        "largest_comp": (
+                            largest_comp if "largest_comp" in locals() else None
+                        ),
+                        "skeleton": skeleton if "skeleton" in locals() else None,
+                        "endpoints": None,
                     },
-                    save_path=plot_path + '_scalebar.png'
+                    save_path=plot_path + "_scalebar.png",
                 )
             return ScalebarDetection(
-                bbox=bbox, pixel_length=0.0, endpoints=None#, uncertainty=0.0
+                bbox=bbox, pixel_length=0.0, endpoints=None  # , uncertainty=0.0
             )
-
 
     def select_best_channel(self, image: np.ndarray) -> np.ndarray:
         """
@@ -135,7 +147,7 @@ class ScalebarProcessor:
 
         Args:
             image: Input image (H, W, C) or (H, W) for grayscale
-            
+
         Returns:
             Single channel image with strongest edges
         """
@@ -156,7 +168,6 @@ class ScalebarProcessor:
         best_channel_idx = np.argmax(sobel_magnitudes)
         return image[:, :, best_channel_idx].astype(np.uint8)
 
-
     def apply_local_thresholding(self, image: np.ndarray, h: int):
         """
         Apply local thresholding to generate a high-contrast binary image.
@@ -170,16 +181,18 @@ class ScalebarProcessor:
         """
         # Compute local threshold using skimage's threshold_local
         block_size = 4 * h + 1
-        local_thresh = threshold_local(image, block_size, method='mean')
+        local_thresh = threshold_local(image, block_size, method="mean")
 
         # Apply threshold
         binary = image > local_thresh
 
         # Determine if background is white or black by checking border pixels
-        border_pixels = np.concatenate([binary[0, :], binary[-1, :], binary[:, 0], binary[:, -1]])
+        border_pixels = np.concatenate(
+            [binary[0, :], binary[-1, :], binary[:, 0], binary[:, -1]]
+        )
         middle_pixels = binary[
-            binary.shape[0]//4:-binary.shape[0]//4, 
-            binary.shape[1]//4:-binary.shape[1]//4
+            binary.shape[0] // 4 : -binary.shape[0] // 4,
+            binary.shape[1] // 4 : -binary.shape[1] // 4,
         ].flatten()
         is_background_white = np.mean(border_pixels) > np.mean(middle_pixels)
 
@@ -188,7 +201,6 @@ class ScalebarProcessor:
             binary = ~binary
 
         return binary.astype(np.uint8) * 255
-
 
     def bar_width_estimation(self, binary: np.ndarray) -> int:
         """
@@ -209,7 +221,6 @@ class ScalebarProcessor:
         # Count the number of lines with more than 50% pixels on
         num_lines = np.sum(proj > 0.5 * np.max(proj))
         return num_lines
-
 
     def morphological_cleanup(self, binary: np.ndarray, kernel_size) -> np.ndarray:
         """
@@ -233,7 +244,6 @@ class ScalebarProcessor:
 
         return cleaned
 
-
     def find_largest_comp(self, binary: np.ndarray) -> np.ndarray:
         """
         Find the largest connected component in the binary image.
@@ -245,7 +255,9 @@ class ScalebarProcessor:
             Binary image with only the largest component
         """
         # Find connected components
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            binary, connectivity=8
+        )
 
         # If no components or only background, return original
         if num_labels <= 1:
@@ -255,14 +267,16 @@ class ScalebarProcessor:
         largest_comp = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
         if num_labels > 2:
             _2nd_largest = 1 + np.argsort(stats[1:, cv2.CC_STAT_AREA])[-2]
-            if stats[largest_comp, cv2.CC_STAT_AREA] < 1.5 * stats[_2nd_largest, cv2.CC_STAT_AREA]:
+            if (
+                stats[largest_comp, cv2.CC_STAT_AREA]
+                < 1.5 * stats[_2nd_largest, cv2.CC_STAT_AREA]
+            ):
                 return binary  # Return original if no dominant component
 
         # Create mask for largest component
         mask = (labels == largest_comp).astype(np.uint8) * 255
 
         return mask
-
 
     def skeletonize(self, binary: np.ndarray) -> np.ndarray:
         """
@@ -284,7 +298,6 @@ class ScalebarProcessor:
         skeleton = cv2.ximgproc.thinning(binary)
         return skeleton
 
-
     def find_endpoints(self, skeleton: np.ndarray) -> np.ndarray:
         """
         Find scale bar endpoints in the skeletonized image
@@ -296,18 +309,18 @@ class ScalebarProcessor:
             Two endpoints (x1, y1), (x2, y2)
         """
         # Kernel to sum the neighbours
-        kernel = [
-            [1, 1, 1],
-            [1, 0, 1],
-            [1, 1, 1]
-        ]
+        kernel = [[1, 1, 1], [1, 0, 1], [1, 1, 1]]
         # 2D convolution (cast image to int32 to avoid overflow)
-        img_conv = scipy.signal.convolve2d(skeleton.astype(np.int32), kernel, mode='same')
+        img_conv = scipy.signal.convolve2d(
+            skeleton.astype(np.int32), kernel, mode="same"
+        )
         # Pick points where pixel is 255 and neighbours sum 255
         endpoints = np.stack(np.where((skeleton == 255) & (img_conv == 255)), axis=1)
 
         if len(endpoints) < 2:
-            raise ValueError("Less than 2 endpoints detected in skeletonized scale bar.")
+            raise ValueError(
+                "Less than 2 endpoints detected in skeletonized scale bar."
+            )
         elif len(endpoints) > 2:
             # If more than 2 endpoints, pick the two farthest apart
             dists = np.linalg.norm(endpoints[:, None] - endpoints[None, :], axis=2)
@@ -319,7 +332,9 @@ class ScalebarProcessor:
 
         return endpoints
 
-    def compute_flat_distance(self, start: Tuple[int, int], end: Tuple[int, int]) -> float:
+    def compute_flat_distance(
+        self, start: Tuple[int, int], end: Tuple[int, int]
+    ) -> float:
         """
         Compute the flat (purely horizontal/vertical) distance between two points.
 
@@ -334,14 +349,13 @@ class ScalebarProcessor:
         v_dist = abs(end[1] - start[1])
         return max(h_dist, v_dist)
 
-
     def visualize_endpoint_detection(
-            self,
-            image: np.ndarray, 
-            xywh: Tuple[int, int, int, int],
-            results: Dict[str, Any],
-            save_path: Optional[str] = None
-        ) -> None:
+        self,
+        image: np.ndarray,
+        xywh: Tuple[int, int, int, int],
+        results: Dict[str, Any],
+        save_path: Optional[str] = None,
+    ) -> None:
         """
         Visualize the endpoint detection process and results.
 
@@ -352,76 +366,84 @@ class ScalebarProcessor:
             save_path: Path to save visualization (optional)
         """
         x, y, w, h = xywh
-        roi = image[y:y+h, x:x+w]
+        roi = image[y : y + h, x : x + w]
 
         fig, axes = plt.subplots(3, 3, figsize=(15, 12))
 
         # Full image
-        axes[0, 0].imshow(image, cmap='gray')
+        axes[0, 0].imshow(image, cmap="gray")
 
         # Draw bounding box
-        rect = Rectangle((x, y), w, h, linewidth=1, edgecolor='blue', facecolor='none')
+        rect = Rectangle((x, y), w, h, linewidth=1, edgecolor="blue", facecolor="none")
         axes[0, 0].add_patch(rect)
-        axes[0, 0].set_title('Full Image Detection')
-        axes[0, 0].axis('off')
+        axes[0, 0].set_title("Full Image Detection")
+        axes[0, 0].axis("off")
 
         # Original ROI
-        axes[0, 1].imshow(roi, cmap='gray')
-        axes[0, 1].set_title('Original ROI')
-        axes[0, 1].axis('off')
+        axes[0, 1].imshow(roi, cmap="gray")
+        axes[0, 1].set_title("Original ROI")
+        axes[0, 1].axis("off")
 
         # Best channel
-        if 'best_channel' in results and results['best_channel'] is not None:
+        if "best_channel" in results and results["best_channel"] is not None:
             # Histogram of best channel
-            axes[0, 2].hist(results['best_channel'].ravel(), bins=256, color='gray', alpha=0.7)
-            axes[0, 2].set_title('Best Channel Distribution')
-            axes[0, 2].set_xlabel('Pixel Intensity')
-            axes[0, 2].set_ylabel('Frequency')
+            axes[0, 2].hist(
+                results["best_channel"].ravel(), bins=256, color="gray", alpha=0.7
+            )
+            axes[0, 2].set_title("Best Channel Distribution")
+            axes[0, 2].set_xlabel("Pixel Intensity")
+            axes[0, 2].set_ylabel("Frequency")
             axes[0, 2].grid(True)
             axes[0, 2].set_xlim(0, 255)
 
             # Show best channel image
-            axes[1, 0].imshow(results['best_channel'], cmap='gray')
-            axes[1, 0].set_title('Best Channel')
-            axes[1, 0].axis('off')
+            axes[1, 0].imshow(results["best_channel"], cmap="gray")
+            axes[1, 0].set_title("Best Channel")
+            axes[1, 0].axis("off")
 
         # Binary image
-        if 'binary_image' in results and results['binary_image'] is not None:
-            axes[1, 1].imshow(results['binary_image'], cmap='gray')
-            axes[1, 1].set_title('Binary Image')
-            axes[1, 1].axis('off')
+        if "binary_image" in results and results["binary_image"] is not None:
+            axes[1, 1].imshow(results["binary_image"], cmap="gray")
+            axes[1, 1].set_title("Binary Image")
+            axes[1, 1].axis("off")
 
         # Cleaned image
-        if 'cleaned_image' in results and results['cleaned_image'] is not None:
-            axes[1, 2].imshow(results['cleaned_image'], cmap='gray')
-            axes[1, 2].set_title('Cleaned Image')
-            axes[1, 2].axis('off')
+        if "cleaned_image" in results and results["cleaned_image"] is not None:
+            axes[1, 2].imshow(results["cleaned_image"], cmap="gray")
+            axes[1, 2].set_title("Cleaned Image")
+            axes[1, 2].axis("off")
 
         # Largest component
-        if 'largest_comp' in results and results['largest_comp'] is not None:
-            axes[2, 0].imshow(results['largest_comp'], cmap='gray')
-            axes[2, 0].set_title('Largest Component')
-            axes[2, 0].axis('off')
+        if "largest_comp" in results and results["largest_comp"] is not None:
+            axes[2, 0].imshow(results["largest_comp"], cmap="gray")
+            axes[2, 0].set_title("Largest Component")
+            axes[2, 0].axis("off")
 
         # Skeleton
-        if 'skeleton' in results and results['skeleton'] is not None:
-            axes[2, 1].imshow(results['skeleton'], cmap='gray')
-            axes[2, 1].set_title('Skeleton')
-            axes[2, 1].axis('off')
-
+        if "skeleton" in results and results["skeleton"] is not None:
+            axes[2, 1].imshow(results["skeleton"], cmap="gray")
+            axes[2, 1].set_title("Skeleton")
+            axes[2, 1].axis("off")
 
         # Result visualization
-        axes[2, 2].imshow(roi, cmap='gray')
-        if results['endpoints']:
-            start_pt, end_pt = results['endpoints']
+        axes[2, 2].imshow(roi, cmap="gray")
+        if results["endpoints"]:
+            start_pt, end_pt = results["endpoints"]
             # Convert back to ROI coordinates
             rel_start = (start_pt[0] - x, start_pt[1] - y)
             rel_end = (end_pt[0] - x, end_pt[1] - y)
 
-            axes[2, 2].plot([rel_start[0], rel_end[0]], [rel_start[1], rel_end[1]],
-                            'r-', linewidth=3, label='Detected scale bar')
-            axes[2, 2].plot(rel_start[0], rel_start[1], 'go', markersize=8, label='Start')
-            axes[2, 2].plot(rel_end[0], rel_end[1], 'ro', markersize=8, label='End')
+            axes[2, 2].plot(
+                [rel_start[0], rel_end[0]],
+                [rel_start[1], rel_end[1]],
+                "r-",
+                linewidth=3,
+                label="Detected scale bar",
+            )
+            axes[2, 2].plot(
+                rel_start[0], rel_start[1], "go", markersize=8, label="Start"
+            )
+            axes[2, 2].plot(rel_end[0], rel_end[1], "ro", markersize=8, label="End")
             axes[2, 2].legend()
 
         axes[2, 2].set_title(f'Result (Length: {results["pixel_length"]:.1f}px)')
@@ -429,7 +451,7 @@ class ScalebarProcessor:
         plt.tight_layout()
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
         else:
             plt.show()
