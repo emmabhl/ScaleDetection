@@ -1,237 +1,228 @@
-# Scale Detection Pipeline
+# **ScaleDetection**
 
-A comprehensive pipeline for detecting and analyzing scale bars in microscopy images, following the Uni-AIMS paper architecture. This implementation provides joint YOLOv8 detection of scale bars and text regions, fine-grained endpoint localization, OCR processing, and pixel-to-physical unit conversion.
+ScaleDetection is a complete computer-vision pipeline for **automatically detecting scale bars and reading their associated text labels** (e.g., “100 μm”, “1 cm”) in microscopy, biology, and satellite images.
+It integrates **YOLO-based detection**, **OCR**, **post-processing**, and **atypical scale-bar classification** to return a standardized measurement output.
 
-## Features
+The pipeline supports:
 
-- **Joint Detection**: YOLOv8m model for detecting both scale bars and text regions
-- **Endpoint Localization**: Fine-grained refinement of scale bar endpoints for accurate pixel length measurement
-- **OCR Processing**: PaddleOCR integration with scientific symbol support and unit normalization
-- **Scale Matching**: Spatial matching between detected text and scale bars
-- **Unit Conversion**: Convert pixel measurements to physical units (mm, μm, nm)
-- **Comprehensive Evaluation**: Detection accuracy, OCR performance, and scale conversion metrics
+* Processing **single images** or **full folders**.
+* Detection of **normal scale bars** and **atypical scale bars** (graduated bars, rulers, etc.)
+* OCR-based reading of physical units (µm, mm, cm…)
+* Pixel-to-metric conversion.
+* Optional visualization/debugging output.
 
-## Installation
+---
 
-1. Clone the repository:
+## **✨ Features**
+
+### **1. Scale Bar Detection (YOLO)**
+
+* Trained YOLO models detect:
+
+  * Class 0 → Scale bar
+  * Class 1 → Text label
+* Handles multiple detections and performs a matching procedure between bar and text.
+
+### **2. Post-Processing**
+
+Core logic implemented in `postprocess_scalebar.py`:
+
+* Localizes scale bar endpoints.
+* Estimates pixel length.
+* Infers orientation and confidence.
+
+### **3. OCR Label Recognition**
+
+Implemented in `ocr.py`:
+
+* Extracts and parses text labels.
+* Converts recognized tokens into numerical scale values and units.
+
+### **4. Atypical Scale Bar Handling**
+
+Implemented in:
+
+* `classifier.py` or `clip_classifier.py` (visual classifier for scale-bar type)
+* `atypical_scalebars.py`
+  Supports:
+* Graduated bars with central unit
+* Ruler-like photo scale bars
+* Other non-standard bar shapes
+
+### **5. Full End-to-End Pipeline**
+
+Main class: `ScaleDetectionPipeline` (in `scaledetection.py`)
+
+Combines YOLO, OCR, and post-processing to output a unified `Scale` dataclass:
+
+```python
+Scale(
+    scale_bar_found=True/False,
+    measured_scale_length=...,
+    declared_scale_length=...,
+    units=...,
+    pixel_to_mm_ratio=...,
+    orientation=...,
+    type_=...,
+)
+```
+
+### **6. Single-Image or Folder Processing**
+
+The command-line interface detects whether the input path is:
+
+* a file → process once
+* a folder → processes each image inside recursively
+
+---
+
+## **📁 Repository Structure**
+
+```
+ScaleDetection/
+│
+├── README.md
+├── VLM.ipynb                   # Vision-language experimentation
+├── draft.ipynb                 # Misc. dev notes / experiments
+├── VLM_detection.sh            # Script for running VLM detection
+├── train_yolo.sh               # SLURM script for YOLO training
+├── technical_note.md           # Technical documentation (internal)
+│
+├── src/
+│   ├── scaledetection.py       # Main pipeline: ScaleDetectionPipeline + Scale dataclass
+│   ├── postprocess_scalebar.py # ScalebarProcessor + ScalebarDetection
+│   ├── ocr.py                  # OCRProcessor + LabelDetection
+│   ├── classifier.py           # ORB-based scale bar type classifier
+│   ├── clip_classifier.py      # CLIP-based scale bar classifier
+│   ├── atypical_scalebars.py   # Extraction for atypical scale bars
+│   ├── convert_jsons_to_yolo.py# Convert annotated datasets to YOLO format
+│   ├── train_yolo.py           # YOLO training script
+│   └── get_data.py             # Data import utilities
+│
+└── models/                     # (optional) place YOLO + CLIP/ORB templates
+```
+
+---
+
+## **🚀 Installation**
+
+### **1. Clone the repository**
+
 ```bash
-git clone <repository-url>
+git clone https://github.com/.../ScaleDetection.git
 cd ScaleDetection
 ```
 
-2. Install dependencies:
+### **2. Install dependencies**
+
 ```bash
 pip install -r requirements.txt
 ```
 
-3. For GPU acceleration (optional):
-```bash
-pip install paddlepaddle-gpu
+### **3. (Optional) download trained YOLO weight files**
+
+Place them in:
+
+```
+models/yolo/
 ```
 
-## Quick Start
+---
 
-### 1. Dataset Preparation
+## **🔧 Usage**
 
-Place your images in `data/figures/` and JSON annotations in `data/jsons/`. The JSON format should include:
+### **Run the pipeline on a single image**
+
+```bash
+python src/scaledetection.py --image path/to/image.jpg --output_dir results_folder/
+```
+
+### **Run the pipeline on a folder**
+
+```bash
+python src/scaledetection.py --image_dir path/to/folder/ --output_dir results_folder/
+```
+
+The pipeline automatically:
+
+* iterates through the folder,
+* processes all images (`.jpg`, `.png`, `.tif`, `.jpeg`),
+* saves results for each file.
+
+---
+
+## **🧠 YOLO Dataset Conversion**
+
+Convert JSON annotations to YOLO format:
+
+```bash
+python src/convert_jsons_to_yolo.py \
+    --input annotations/ \
+    --output yolo_dataset/
+```
+
+---
+
+## **🎯 YOLO Training**
+
+Train a YOLO model (Ultralytics):
+
+```bash
+python src/train_yolo.py --data config.yaml --epochs 200
+```
+
+Or submit the SLURM script:
+
+```bash
+sbatch train_yolo.sh
+```
+
+---
+
+## **🖼️ Vision-Language Experiments**
+
+In the folder `VLM/` you can find code for experimenting with Qwen3 vision-language models 
+for scale-bar detection and classification.
+
+Script interface:
+
+* `VLM/VLM.py`
+
+Used for:
+
+* Prompting vision-language models
+* Scale-bar reasoning when YOLO fails
+* Experimentation with multimodal embeddings
+
+---
+
+## **📈 Outputs**
+
+For each image, the pipeline generates a JSON containing:
 
 ```json
 {
-  "width": 671,
-  "height": 476,
-  "bars": [
-    {
-      "id": 0,
-      "points": [[387.49, 462.90], [651.19, 469.88]]
-    }
-  ],
-  "labels": [
-    {
-      "id": 1,
-      "points": [[69.95, 212.17], [93.86, 221.53]],
-      "text": "1um"
-    }
-  ]
+  "scale_bar_found": true,
+  "type": "normal",
+  "measured_scale_length": 235.3,
+  "declared_scale_length": 100,
+  "units": "µm",
+  "pixel_to_mm_ratio": 0.42,
+  "orientation": "horizontal",
+  "scale_bar_confidence": 0.92,
+  "text_label_confidence": 0.87
 }
 ```
 
-### 2. Convert Dataset to YOLO Format
+If debug mode is enabled, annotated images and intermediate plots are saved automatically.
 
-```bash
-python src/convert_jsons_to_yolo.py --json_dir data/jsons --output_dir outputs/yolo_dataset
-```
+---
 
-### 3. Train YOLOv8 Model
+These contain architecture thoughts, TODOs, and experimental ideas.
 
-```bash
-python src/train_yolov8.py --data_yaml outputs/yolo_dataset/data.yaml --epochs 100 --batch 8
-```
+---
 
-### 4. Test Endpoint Localization
+## **📬 Contact**
 
-```bash
-python src/postprocess_scalebar.py --image data/figures/1.jpg --bbox "100,200,150,50" --visualize
-```
-
-### 5. Run OCR and Matching
-
-```bash
-python src/ocr_and_match.py --image data/figures/1.jpg --bars_json outputs/bars.json --output outputs/results.json
-```
-
-### 6. Convert Pixels to Physical Units
-
-```bash
-python src/pixels_to_mm.py --um_per_pixel 0.1 --pixel_length 100 --physical_length 10 --unit um
-```
-
-### 7. Evaluate Pipeline
-
-```bash
-python src/evaluate_pipeline.py --results outputs/results.json --ground_truth data/ground_truth.json
-```
-
-## Jupyter Notebook
-
-For interactive usage, run the complete pipeline notebook:
-
-```bash
-jupyter notebook pipeline.ipynb
-```
-
-## Architecture
-
-The pipeline consists of several key components:
-
-### 1. Dataset Conversion (`src/convert_jsons_to_yolo.py`)
-- Converts JSON annotations to YOLO format
-- Handles polygon-to-bounding-box conversion
-- Creates train/validation splits
-- Validates conversion accuracy
-
-### 2. Model Training (`src/train_yolov8.py`)
-- YOLOv8m pretrained model
-- Custom hyperparameters for microscopy images
-- Data augmentation strategies
-- Model export to ONNX format
-
-### 3. Endpoint Localization (`src/postprocess_scalebar.py`)
-- Channel selection for strongest edges
-- Adaptive thresholding (Sauvola/Otsu)
-- Morphological operations
-- Peak detection and subpixel refinement
-
-### 4. OCR and Matching (`src/ocr_and_match.py`)
-- PaddleOCR integration
-- Text parsing with regex patterns
-- Unit normalization (μm/um/µm → um)
-- Spatial matching between text and bars
-
-### 5. Pixel Conversion (`src/pixels_to_mm.py`)
-- Convert coordinates, distances, and areas
-- Support for mm, μm, and nm units
-- Batch processing capabilities
-- Validation and error handling
-
-### 6. Evaluation (`src/evaluate_pipeline.py`)
-- Detection mAP calculation
-- OCR accuracy metrics
-- Scale conversion accuracy
-- Comprehensive reporting
-
-## Configuration
-
-### Training Parameters
-- **Model**: YOLOv8m (medium)
-- **Input Size**: 1280x1280 pixels
-- **Batch Size**: 8 (adjust based on GPU memory)
-- **Epochs**: 50-100
-- **Learning Rate**: 0.01 with cosine scheduler
-- **Weight Decay**: 0.0005
-
-### OCR Settings
-- **Backend**: PaddleOCR (default), EasyOCR, Tesseract
-- **Confidence Threshold**: 0.15
-- **Language**: English with scientific symbols
-- **Unit Normalization**: Automatic conversion to standard units
-
-### Endpoint Localization
-- **Thresholding**: Sauvola (default) or Otsu
-- **Window Size**: 15 pixels
-- **Peak Prominence**: 0.1
-- **Subpixel Refinement**: Enabled
-
-## Output Files
-
-The pipeline generates several output files:
-
-- `outputs/yolo_dataset/`: YOLO format dataset
-- `outputs/training/`: Trained model checkpoints
-- `models/scale_detection_model.onnx`: Exported ONNX model
-- `outputs/ocr_results_*.json`: OCR and matching results
-- `outputs/evaluation_report.txt`: Comprehensive evaluation report
-- `outputs/*.png`: Visualization plots
-
-## Performance
-
-Expected performance metrics (on typical microscopy datasets):
-
-- **Detection mAP@0.5**: >0.8
-- **OCR Character Accuracy**: >0.9
-- **Scale Conversion Success Rate**: >0.9
-- **Endpoint Localization MAE**: <2 pixels
-
-## Troubleshooting
-
-### Common Issues
-
-1. **PaddleOCR Installation**:
-   ```bash
-   pip install paddlepaddle paddleocr
-   ```
-
-2. **CUDA/GPU Issues**:
-   - Check CUDA installation: `nvidia-smi`
-   - Use CPU if GPU not available: set `device='cpu'`
-
-3. **Memory Issues**:
-   - Reduce batch size: `--batch 4`
-   - Reduce image size: `--imgsz 640`
-
-4. **Poor Detection Results**:
-   - Increase training epochs
-   - Adjust confidence thresholds
-   - Check data quality and annotations
-
-### Performance Tips
-
-1. Use GPU acceleration when available
-2. Batch process multiple images
-3. Use appropriate image sizes (1280 for high-res, 640 for speed)
-4. Cache OCR models to avoid reloading
-5. Use ONNX models for faster inference
-
-## Citation
-
-If you use this pipeline in your research, please cite the Uni-AIMS paper:
-
-```bibtex
-@article{uni-aims-2023,
-  title={Uni-AIMS: Unified AI for Microscopy Scale Detection},
-  author={[Authors]},
-  journal={[Journal]},
-  year={2023}
-}
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For questions and support, please open an issue on GitHub.
+Created and maintained by **emmabhl**.
+If you use or extend this tool, feel free to open issues or PRs.

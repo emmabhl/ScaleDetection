@@ -1,71 +1,54 @@
 """
-JSON to YOLO Format Conversion Script
+Convert JSON annotations to YOLO format (module intro)
 
-This script converts the provided JSON annotations to YOLOv8 format for training
-a joint detection model for scale bars and scale text regions.
+This script converts polygon-style JSON annotations produced for the
+scale-bar dataset into YOLOv8 text files and builds a `data.yaml` for
+training. It outputs label `.txt` files and organizes `images/` and
+`labels/` into `train` / `val` splits.
 
-Classes:
-- 0: scalebar
-- 1: scalelabel
+Example (complete call):
+    python src/convert_jsons_to_yolo.py --data_dir data --train_split 0.8 --validate --sample_size 100
 
-The script handles:
-- Converting polygon points to bounding boxes
-- Normalizing coordinates to [0,1] range
-- Creating YOLO dataset structure
-- Handling edge cases and validation
-
-Usage:
-    python src/convert_jsons_to_yolo.py --data_dir data --train_split 0.8 --validate True
+See the functions below for the exact conversion logic.
 """
 
-import json
-import os
-import yaml
-from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Union
-import numpy as np
 import argparse
+import json
+import logging as log
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import yaml
+
 
 def points_to_yolo_bbox(
-        points: List[List[float]], 
+        points: List[List[float]],
         img_width: int, 
         img_height: int
     ) -> Tuple[float, float, float, float]:
-    """
-    Convert polygon points to YOLO format bounding box. The annotations are annotated as follows:
-    [
-        [ x_min, y_min ],
-	    [ x_max, y_max ]
-	]
+    """Convert polygon corner points to YOLO-format normalized bbox.
 
-    (x_min, y_min)		(x_max, y_min)
-		     _______________
-		    |				|
-		    |				|
-		    |				|
-		    |				|
-		    |_______________|
-    (x_min, y_max)		(x_max, y_max)
-    
     Args:
-        points: List of [x, y] coordinate pairs
-        img_width: Image width in pixels
-        img_height: Image height in pixels
-        
+        points (List[List[float]]): List of [x,y] point coordinates (at least two corners).
+        img_width (int): Width of the image in pixels.
+        img_height (int): Height of the image in pixels.
+
     Returns:
-        Tuple of (x_center, y_center, width, height) normalized to [0,1]
+        yolo_box (Tuple[float,float,float,float]): (x_center, y_center, width, height) normalized to [0,1].
     """
     if len(points) < 2:
         raise ValueError("At least 2 points required for bounding box")
     
     # Convert to numpy array for easier manipulation
-    points = np.array(points, dtype=np.float32)
+    points_arr = np.array(points, dtype=np.float32)
     
     # Get bounding box coordinates
-    x_min = np.min(points[:, 0])
-    y_min = np.min(points[:, 1])
-    x_max = np.max(points[:, 0])
-    y_max = np.max(points[:, 1])
+    x_min = np.min(points_arr[:, 0])
+    y_min = np.min(points_arr[:, 1])
+    x_max = np.max(points_arr[:, 0])
+    y_max = np.max(points_arr[:, 1])
     
     # Clip to image boundaries (shouldn't be necessary but just in case)
     x_min = max(0, min(x_min, img_width))
@@ -80,24 +63,23 @@ def points_to_yolo_bbox(
     width    = (x_max - x_min) / img_width
     height   = (y_max - y_min) / img_height
 
-    return x_center, y_center, width, height
+    return float(x_center), float(y_center), float(width), float(height)
 
 
 def convert_json_to_yolo(
-        json_path: Path, 
+        json_path: str, 
         label_dir: Path, 
         class_mapping: Dict[str, int]
     ) -> bool:
-    """
-    Convert a single JSON annotation file to YOLO format.
-    
+    """Convert a single JSON annotation file into a YOLO `.txt` label file.
+
     Args:
-        json_path: Path to the JSON annotation file
-        label_dir: Directory to save YOLO annotation files
-        class_mapping: Mapping from class names to class indices
-        
+        json_path (str): Path to the JSON annotation file.
+        label_dir (Path): Directory where YOLO `.txt` files will be created.
+        class_mapping (Dict[str,int]): Mapping from logical class names to integer class ids.
+
     Returns:
-        True if conversion successful, False otherwise
+        success (bool): True on successful conversion, False otherwise.
     """
     try:
         with open(json_path, 'r') as f:
@@ -108,7 +90,7 @@ def convert_json_to_yolo(
         img_height = data.get('height', 0)
         
         if img_width <= 0 or img_height <= 0:
-            print(f"Warning: Invalid image dimensions in {json_path}")
+            log.error(f"Invalid image dimensions in {json_path}")
             return False
         
         # Prepare YOLO annotations
@@ -117,7 +99,6 @@ def convert_json_to_yolo(
         # Process scale bars (class 0)
         for bar in data.get('bars', []):
             if 'points' in bar and len(bar['points']) >= 2:
-                try:
                     x_center, y_center, width, height = points_to_yolo_bbox(
                         bar['points'], img_width, img_height
                     )
@@ -127,15 +108,11 @@ def convert_json_to_yolo(
                             f"{class_mapping['scalebar']} \
                                 {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
                         )
-                except Exception as e:
-                    print(f"Warning: Failed to process bar in {json_path}: {e}")
-                    continue
         
         # Process scale text (class 1)
         for label in data.get('labels', []):
             if 'points' in label and len(label['points']) >= 2:
-                try:
-                    x_center, y_center, width, height = points_to_yolo_bbox(
+                x_center, y_center, width, height = points_to_yolo_bbox(
                         label['points'], img_width, img_height
                     )
                     # Skip if bbox is too small
@@ -144,22 +121,19 @@ def convert_json_to_yolo(
                             f"{class_mapping['scalelabel']} \
                                 {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
                         )
-                except Exception as e:
-                    print(f"Warning: Failed to process label in {json_path}: {e}")
-                    continue
-        
+
         # Write YOLO annotation file
         json_filename = os.path.basename(json_path)
         txt_filename = json_filename.replace('.json', '.txt')
         txt_path = os.path.join(label_dir, txt_filename)
-        
+
         with open(txt_path, 'w') as f:
             f.write('\n'.join(yolo_annotations))
-        
+
         return True
-        
+
     except Exception as e:
-        print(f"Error processing {json_path}: {e}")
+        log.error(f"Error processing {json_path}: {e}")
         return False
 
 
@@ -167,29 +141,28 @@ def create_dataset_yaml(
         data_dir: Path, 
         class_mapping: Dict[str, int], 
         train_split: float = 0.8
-    ) -> Path:
-    """
-    Create YOLO dataset configuration file.
-    
+    ) -> str:
+    """Create a `data.yaml` file describing the YOLO dataset layout.
+
     Args:
-        data_dir: Directory containing the dataset
-        class_mapping: Mapping of class names to class indices
-        train_split: Fraction of data to use for training
-        
+        data_dir (Path): Root dataset directory containing `images/` and `labels/`.
+        class_mapping (Dict[str,int]): Mapping of class names to ids.
+        train_split (float, optional): Fraction of dataset to use for training. Defaults to 0.8.
+
     Returns:
-        Path to the created YAML file
+        yaml_path (str): Path to the written YAML configuration file.
     """
     yaml_path = os.path.join(data_dir, 'data.yaml')
-    
+
     # Get list of all annotation files
     annotation_files = [f for f in os.listdir(data_dir / 'labels') if f.endswith('.txt')]
     annotation_files.sort()
-    
+
     # Split into train/val
     n_train = int(len(annotation_files) * train_split)
     train_files = annotation_files[:n_train]
     val_files = annotation_files[n_train:]
-    
+
     # Create dataset structure
     img_train_dir = data_dir / 'images' / 'train'
     img_val_dir = data_dir / 'images' / 'val'
@@ -208,37 +181,36 @@ def create_dataset_yaml(
         'nc': len(class_mapping),
         'names': {v: k for k, v in class_mapping.items()}
     }
-    
+
     # Move files
     for txt_file in train_files:
         img_file = txt_file.replace('.txt', '.jpg')
-        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(img_train_dir, img_file))
-        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(lab_train_dir, txt_file))
+        os.rename(os.path.join(data_dir /'images', img_file), os.path.join(img_train_dir, img_file))
+        os.rename(os.path.join(data_dir /'labels', txt_file), os.path.join(lab_train_dir, txt_file))
     for txt_file in val_files:
         img_file = txt_file.replace('.txt', '.jpg')
-        os.rename(os.path.join(data_dir / 'images', img_file), os.path.join(img_val_dir, img_file))
-        os.rename(os.path.join(data_dir / 'labels', txt_file), os.path.join(lab_val_dir, txt_file))
+        os.rename(os.path.join(data_dir /'images', img_file), os.path.join(img_val_dir, img_file))
+        os.rename(os.path.join(data_dir /'labels', txt_file), os.path.join(lab_val_dir, txt_file))
 
     # Write YAML config
     with open(yaml_path, 'w') as f:
         yaml.dump(dataset_config, f, default_flow_style=False)
-    
+
     return yaml_path
 
 
 def convert_dataset(
         data_dir: Path, 
         train_split: float = 0.8
-    ) -> Path:
-    """
-    Convert entire dataset from JSON to YOLO format.
-    
+    ) -> str:
+    """Convert all JSON annotations in a dataset to YOLO format and build splits.
+
     Args:
-        data_dir: Directory containing 'images', 'jsons', and where 'labels' will be created
-        train_split: Fraction of data to use for training
-        
+        data_dir (Path): Dataset root containing `images/` and `jsons/`.
+        train_split (float, optional): Fraction for train split. Defaults to 0.8.
+
     Returns:
-        Path to the created dataset YAML file
+        yaml_path (str): Path to the generated `data.yaml` file.
     """
     # Configure and create label directory
     json_dir  = data_dir / 'jsons'
@@ -256,63 +228,55 @@ def convert_dataset(
     # Get all JSON files
     json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
     json_files.sort()
-        
+
     # Convert each JSON file
     successful_conversions = 0
     for json_file in json_files:
         json_path = os.path.join(json_dir, json_file)
         if convert_json_to_yolo(json_path, label_dir, class_mapping):
             successful_conversions += 1
-    
-    print(f"Successfully converted {successful_conversions}/{len(json_files)} files")
-    
+
     # Create dataset YAML
     yaml_path = create_dataset_yaml(data_dir, class_mapping, train_split)
-    print(f"Created dataset configuration: {yaml_path}")
-    
+
     return yaml_path
 
 
 def validate_conversion(
         label_dir: Path, 
         sample_size: int = -1
-    ) -> Dict[str, float]:
-    """
-    Validate the conversion by checking a sample of files.
-    
+    ) -> Dict[str, Union[float, int]]:
+    """Validate a set of YOLO annotation files and return simple statistics.
+
     Args:
-        label_dir: Directory containing YOLO annotations
-        sample_size: Number of files to check (-1 for all)
-        
+        label_dir (Path): Directory containing YOLO `.txt` annotation files.
+        sample_size (int, optional): How many files to sample (-1 = all). Defaults to -1.
+
     Returns:
-        Dictionary with validation statistics
+        stats (Dict[str, Union[float,int]]): Summary statistics about annotations.
     """
     txt_files = [f for f in os.listdir(label_dir) if f.endswith('.txt')]
     sample_files = txt_files[:sample_size] if sample_size != -1 else txt_files
-    
+
     stats = {
         'total_files': len(txt_files),
         'sample_size': len(sample_files),
         'files_with_annotations': 0,
         'total_scalebars': 0,
         'total_scalelabels': 0,
-        'avg_annotations_per_file': 0
+        'avg_annotations_per_file': 0.0
     }
-    
+
     for txt_file in sample_files:
         txt_path = os.path.join(label_dir, txt_file)
-        
-        try:
-            with open(txt_path, 'r') as f:
-                lines = f.readlines()
-            
-            if lines:
-                stats['files_with_annotations'] += 1
-                stats['total_scalebars'] += sum(1 for line in lines if line.startswith('0 '))
-                stats['total_scalelabels'] += sum(1 for line in lines if line.startswith('1 '))
-        
-        except Exception as e:
-            print(f"Error validating {txt_file}: {e}")
+
+        with open(txt_path, 'r') as f:
+            lines = f.readlines()
+
+        if lines:
+            stats['files_with_annotations'] += 1
+            stats['total_scalebars'] += sum(1 for line in lines if line.startswith('0 '))
+            stats['total_scalelabels'] += sum(1 for line in lines if line.startswith('1 '))
 
     stats['avg_annotations_per_file'] = (
         stats['total_scalebars'] + stats['total_scalelabels']
@@ -332,8 +296,13 @@ def main():
                         help='Run validation after conversion')
     parser.add_argument('--sample_size', type=int, default=-1,
                         help='Number of files to sample for validation (-1 for all)')
-    
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable verbose logging')
+
     args = parser.parse_args()
+
+    log_level = log.DEBUG if args.verbose else log.INFO
+    log.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
     # Define directory paths
     DATA_DIR = Path(args.data_dir)
@@ -343,7 +312,7 @@ def main():
 
     # Check if already converted
     if os.path.exists(LABELS_DIR) and os.listdir(LABELS_DIR):
-        print(f"Labels directory {LABELS_DIR} already exists and is not empty. Skipping conversion")
+        log.info(f"{LABELS_DIR} already exists and is not empty. Skipping conversion")
         yaml_path = DATA_DIR / 'data.yaml'
     else:
 
@@ -353,24 +322,23 @@ def main():
         image_files = list(Path(IMAGES_DIR).glob("*.jpg"))
         json_files = list(Path(JSONS_DIR).glob("*.json"))
 
-        print(f"Found {len(image_files)} image files")
-        print(f"Found {len(json_files)} JSON annotation files")
-        
+        log.info(f"Found {len(image_files)} image files")
+        log.info(f"Found {len(json_files)} JSON annotation files")
+
         # Convert dataset
         yaml_path = convert_dataset(DATA_DIR, args.train_split)
-        
+
         # Run validation if requested
-        if args.validate:
+        if args.verbose:
             stats = validate_conversion(
                 LABELS_DIR / 'train',
                 sample_size=args.sample_size
             )
-            print(f"Validation results:")
+            log.info(f"Validation results:")
             for key, value in stats.items():
-                print(f"  {key}: {value}")
+                log.info(f"  {key}: {value}")
 
-    print(f"Dataset ready for YOLO training. Configuration file: {yaml_path}")
-
+    log.info(f"Dataset ready for YOLO training. Configuration file: {yaml_path}")
 
 if __name__ == "__main__":
     main()

@@ -1,33 +1,39 @@
-"""Script to download dataset from Kaggle and prepare data directories.
-If the data directories already exist, it skips the download.
+"""
+Dataset downloader and preparer
 
-The script handles:
-- Downloading the dataset from Kaggle using kagglehub.
-- Moving images and JSON files to the appropriate data directories.
-- Creating necessary directories for labels, models, and outputs.
+Downloads the dataset from Kaggle (via `kagglehub`) and arranges files into
+the expected `data/` layout with `images/` and `jsons/`. If the target
+directories already exist, the script will skip the download.
 
-Usage:
+Example (complete call):
     python src/get_data.py --path original1/scalebar-dataset --data_dir data
+
+This script is intended to be run once to prepare the dataset prior to
+conversion/training.
 """
 
+import argparse
+import logging as log
 import os
 from pathlib import Path
-import argparse
 import shutil
+
 import kagglehub
 
 
 def download_from_path(
-        path: str ,
-        data_dir: Path,
-        images_dir: Path,
-        jsons_dir: Path
-    ) -> None:
-    """
-    Downloads a kaggle dataset from the given path and moves it to the data directory.
+    path: str, data_dir: Path, images_dir: Path, jsons_dir: Path
+) -> None:
+    """Download a Kaggle dataset via `kagglehub` and arrange data directories.
 
     Args:
-        path (str): The file path.
+        path (str): Kaggle dataset path or identifier to download.
+        data_dir (Path): Destination dataset root directory.
+        images_dir (Path): Destination directory for image files.
+        jsons_dir (Path): Destination directory for JSON annotation files.
+
+    Returns:
+        None: Downloads and moves files into the provided directories.
     """
     # Get the dataset files if needed
     os.makedirs(data_dir, exist_ok=True)
@@ -41,14 +47,22 @@ def download_from_path(
     # Remove the original dataset folder
     shutil.rmtree(Path(path).parent.parent.parent, ignore_errors=True)
 
+
 def main() -> None:
-    """Main function for command-line usage."""
-    parser = argparse.ArgumentParser(description='Download dataset and prepare folders.')
-    parser.add_argument('--path', type=str, default="original1/scalebar-dataset",
-                        help='Kaggle dataset path to download from.')
-    parser.add_argument('--data_dir', type=str, default='data',
-                        help='Directory to store the dataset.')
-    
+    """CLI entry point to download and prepare dataset directories."""
+    parser = argparse.ArgumentParser(
+        description="Download dataset and prepare folders."
+    )
+    parser.add_argument(
+        "--path",
+        type=str,
+        default="original1/scalebar-dataset",
+        help="Kaggle dataset path to download from.",
+    )
+    parser.add_argument(
+        "--data_dir", type=str, default="data", help="Directory to store the dataset."
+    )
+
     args = parser.parse_args()
 
     # Define directory paths
@@ -58,13 +72,14 @@ def main() -> None:
 
     # Check if data directories exist, if not download the dataset
     if not (
-        os.path.exists(DATA_DIR) and 
-        os.path.exists(IMAGES_DIR) and 
-        os.path.exists(JSONS_DIR)
+        os.path.exists(DATA_DIR)
+        and os.path.exists(IMAGES_DIR)
+        and os.path.exists(JSONS_DIR)
     ):
         download_from_path(args.path, DATA_DIR, IMAGES_DIR, JSONS_DIR)
     else:
-        print("Data directories already exist. Skipping download.")
+        log.info("Data directories already exist. Skipping download.")
+
 
 if __name__ == "__main__":
     main()
