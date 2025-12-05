@@ -1,358 +1,414 @@
-"""
-Scale Bar Endpoint Localization
-
-This module implements fine-grained endpoint localization for scale bars.
-It refines detected scale bar bounding boxes to find precise endpoints and
-compute accurate pixel lengths using local thresholding, morphological
-cleanup, skeletonization and peak-based endpoint selection.
-
-Example (complete call):
-    python src/postprocess_scalebar.py --image data/images/val/9.jpg --output_dir outputs --visualize
-
-The main consumer of these utilities is `scaledetection.py` which calls the
-`ScalebarProcessor.localize_scalebar_endpoints` method for per-ROI refinement.
-"""
-
-import logging as log
+from calendar import c
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-
-import cv2
-import matplotlib.pyplot as plt
+from typing import Tuple, Optional, List, Dict, Any, Sequence
 import numpy as np
-import scipy.signal
+import cv2
+import math
+import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from skimage.filters import threshold_local
+import os
+import logging
+from scipy.ndimage import uniform_filter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ScalebarDetection:
     """Data class for scale bar detection results."""
 
-    bbox: Tuple[int, int, int, int]  # (x, y, w, h)
+    bbox: np.ndarray  # (x_min, y_min, x_max, y_max)
     pixel_length: Optional[float] = None
     endpoints: Optional[List[Tuple[float, float]]] = None
     flag: Optional[bool] = False
-    # uncertainty: Optional[float] = None
 
 
 class ScalebarProcessor:
     """Class for post-processing scale bar detection results."""
 
+    def __init__(self, extend_ratio=0.25):
+        self.extend_ratio = extend_ratio
+
     def localize_scalebar_endpoints(
         self,
         image: np.ndarray,
-        bbox: Tuple[int, int, int, int],
+        bbox: np.ndarray,
         plot_path: Optional[str] = None,
     ) -> ScalebarDetection:
-        """Localize scale bar endpoints within a bounding box
+        """Localize scale bar endpoints within a bounding box.
+        bbox is expected as (x_min, y_min, x_max, y_max).
 
         Args:
-            image (np.ndarray): Input image
-            bbox (Tuple[int, int, int, int]): Bounding box as (x, y, width, height)
-            plot_path (Optional[str], optional): Path to save debug visualization. Defaults to None.
+            image: Input image.
+            bbox: Bounding box around the scale bar.
+            plot_path: Optional path to save debug visualization.
 
         Returns:
-            ScalebarDetection: Detected scalebar information including pixel length and endpoints.
+            ScalebarDetection object with results.
         """
-        x, y, w, h = bbox
+        bbox = bbox.astype(int)
+        x_min, y_min, x_max, y_max = bbox
 
-        # Extract ROI
-        roi = image[y : y + h, x : x + w]
-
-        if roi.size == 0:
+        # basic bbox sanity
+        if not (
+            0 <= x_min < x_max <= image.shape[1]
+            and 0 <= y_min < y_max <= image.shape[0]
+        ):
             return ScalebarDetection(
-                bbox=bbox, pixel_length=0.0, endpoints=None  # , uncertainty=0.0
+                bbox=bbox, pixel_length=0.0, endpoints=None, flag=False
             )
-
         try:
-            # Step 1: Channel selection
-            best_channel = self.select_best_channel(roi)
+            # Extend box
+            ext_bbox = self._extend_bbox(bbox, image.shape)
 
-            # Step 2: Local thresholding
-            binary = self.apply_local_thresholding(best_channel, h=h)
+            # Crop ROI and convert to grayscale + contrast enhancement
+            roi = self._extract_roi(image, ext_bbox)
 
-            # Step 3: Morphological cleanup (opening and closing)
-            kernel_size = int(self.bar_width_estimation(binary) / 2) + 1
-            cleaned = self.morphological_cleanup(binary, kernel_size=kernel_size)
+            # Compute gradient magnitude with Scharr operator
+            grad = self._compute_gradient(roi)
 
-            # Step 4: Find largest component (/!\ Only works if scale bar is in one piece)
-            largest_comp = self.find_largest_comp(cleaned)
+            # Thresholding to get edges (Otsu)
+            binary = self._thresholding(grad)
 
-            # Step 5: Skeletonization to thin the scale bar
-            skeleton = self.skeletonize(largest_comp)
+            # Extract connected components and keep largest thin one
+            filled_contour, flag = self._get_contours(binary)
 
-            # Step 6: Find endpoints
-            start, end = self.find_endpoints(skeleton)  # For horizontal scalebar
+            # Estimate length using PCA
+            pca_result = self._pca_length_estimation(filled_contour)
 
-            # Step 7: Compute pixel length
-            pixel_length = self.compute_flat_distance(start, end)
+            if pca_result[0] is None or pca_result[1] is None:
+                raise ValueError("PCA length estimation failed.")
 
+            # Compute final length and endpoints in global image coordinates
+            p1, p2 = self._compute_endpoints(pca_result[0], pca_result[1], ext_bbox)
+
+            # Compute flat distance as pixel length
+            pixel_length = self._compute_flat_distance(p1, p2)
+
+            # Optionally save debug visualization
             if plot_path is not None:
+                viz_dict = {
+                    "pixel_length": pixel_length,
+                    "bbox_ext": ext_bbox,
+                    "gradient_mag": grad,
+                    "binary_image": binary,
+                    "filled_contour": filled_contour,
+                    "pca_projection": pca_result[2],
+                    "endpoints": (p1, p2),
+                }
+
                 self.visualize_endpoint_detection(
                     image,
-                    (x, y, w, h),
-                    {
-                        "pixel_length": pixel_length,
-                        "best_channel": best_channel,
-                        "binary_image": binary,
-                        "cleaned_image": cleaned,
-                        "largest_comp": largest_comp,
-                        "skeleton": skeleton,
-                        "endpoints": [
-                            (start[1] + x, start[0] + y),
-                            (end[1] + x, end[0] + y),
-                        ],
-                    },
+                    (x_min, y_min, x_max, y_max),
+                    viz_dict,
                     save_path=plot_path + "_scalebar.png",
                 )
 
             return ScalebarDetection(
                 bbox=bbox,
                 pixel_length=pixel_length,
-                endpoints=[(start[1] + x, start[0] + y), (end[1] + x, end[0] + y)],
-                # uncertainty=0.0 # Placeholder for uncertainty estimation,
-                flag=True if pixel_length < 0.75 * max(w, h) else False,
+                endpoints=[(p1[0], p1[1]), (p2[0], p2[1])],
+                flag=(pixel_length < 0.66 * max(x_max - x_min, y_max - y_min)) or flag,
             )
 
         except Exception as e:
-            log.error(f"Error occurred while localizing scale bar endpoints: {e}")
+            logger.error(f"Error in localizing scalebar endpoints: {e}")
 
             if plot_path is not None:
                 self.visualize_endpoint_detection(
                     image,
-                    (x, y, w, h),
+                    (x_min, y_min, x_max, y_max),
                     {
                         "pixel_length": 0.0,
-                        "best_channel": (
-                            best_channel if "best_channel" in locals() else None
-                        ),
+                        "bbox_ext": ext_bbox if "ext_bbox" in locals() else None,
+                        "gradient_mag": grad if "grad" in locals() else None,
                         "binary_image": binary if "binary" in locals() else None,
-                        "cleaned_image": cleaned if "cleaned" in locals() else None,
-                        "largest_comp": (
-                            largest_comp if "largest_comp" in locals() else None
+                        "filled_contour": (
+                            filled_contour if "filled_contour" in locals() else None
                         ),
-                        "skeleton": skeleton if "skeleton" in locals() else None,
+                        "pca_projection": (
+                            pca_result[2]
+                            if ("pca_result" in locals() and pca_result[2] is not None)
+                            else None
+                        ),
                         "endpoints": None,
                     },
                     save_path=plot_path + "_scalebar.png",
                 )
+
             return ScalebarDetection(
-                bbox=bbox, pixel_length=0.0, endpoints=None  # , uncertainty=0.0
+                bbox=bbox, pixel_length=0.0, endpoints=None, flag=flag
             )
 
-    def select_best_channel(self, image: np.ndarray) -> np.ndarray:
-        """
-        Select the channel with the strongest edges for scale bar detection.
+    def _extend_bbox(
+        self, bbox: np.ndarray, img_shape: Sequence[int]
+    ) -> Tuple[int, int, int, int]:
+        """Extend the bbox by self.extend_ratio in all directions.
 
         Args:
-            image: Input image (H, W, C) or (H, W) for grayscale
+            bbox (np.ndarray): Original bounding box (x1, y1, x2, y2).
+            img_shape (Sequence[int]): Shape of the image (height, width[, channels]).
 
         Returns:
-            Single channel image with strongest edges
+            ext_bbox (Tuple[int, int, int, int]): Extended bounding box (x1, y1, x2, y2).
         """
-        # If image is grayscale, return as is
-        if len(image.shape) == 2:
-            return image
+        # Support images with 2 or 3 dimensions by slicing the first two elements
+        h, w = img_shape[:2]
+        x1, y1, x2, y2 = bbox
 
-        # Compute Sobel magnitude for each channel
-        sobel_magnitudes = []
-        for i in range(image.shape[2]):
-            channel = image[:, :, i]
-            sobel_x = cv2.Sobel(channel, cv2.CV_64F, 1, 0, ksize=3)
-            sobel_y = cv2.Sobel(channel, cv2.CV_64F, 0, 1, ksize=3)
-            magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
-            sobel_magnitudes.append(np.mean(magnitude))
+        bw, bh = x2 - x1, y2 - y1
+        dx, dy = int(bw * self.extend_ratio), int(bh * self.extend_ratio)
 
-        # Select channel with highest edge strength
-        best_channel_idx = np.argmax(sobel_magnitudes)
-        return image[:, :, best_channel_idx].astype(np.uint8)
+        x1n = max(x1 - dx, 0)
+        y1n = max(y1 - dy, 0)
+        x2n = min(x2 + dx, w)
+        y2n = min(y2 + dy, h)
 
-    def apply_local_thresholding(self, image: np.ndarray, h: int):
-        """
-        Apply local thresholding to generate a high-contrast binary image.
+        return (x1n, y1n, x2n, y2n)
+
+    def _extract_roi(
+        self, image: np.ndarray, bbox: Tuple[int, int, int, int]
+    ) -> np.ndarray:
+        """Crop the region of interest and return it in grayscale.
 
         Args:
-            image: Grayscale input image (values in [0, 255] or [0, 1]).
-            radius: Radius of the local neighborhood used to compute local thresholds.
+            image (np.ndarray): Original image.
+            bbox (Tuple[int, int, int, int]): Bounding box (x1, y1, x2, y2).
 
         Returns:
-            binary: Binarized image with True for foreground and False for background.
+            roi (np.ndarray): Grayscale cropped region.
         """
-        # Compute local threshold using skimage's threshold_local
-        block_size = 4 * h + 1
-        local_thresh = threshold_local(image, block_size, method="mean")
+        x1, y1, x2, y2 = bbox
+        roi = image[int(y1) : int(y2), int(x1) : int(x2)]
 
-        # Apply threshold
-        binary = image > local_thresh
+        if len(roi.shape) > 2:
+            roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
 
-        # Determine if background is white or black by checking border pixels
-        border_pixels = np.concatenate(
-            [binary[0, :], binary[-1, :], binary[:, 0], binary[:, -1]]
-        )
-        middle_pixels = binary[
-            binary.shape[0] // 4 : -binary.shape[0] // 4,
-            binary.shape[1] // 4 : -binary.shape[1] // 4,
-        ].flatten()
-        is_background_white = np.mean(border_pixels) > np.mean(middle_pixels)
+        # Increase contrast to help edge detection
+        p5, p95 = np.percentile(roi, (5, 95))
+        roi = np.clip((roi - p5) * (255.0 / (p95 - p5 + 1e-8)), 0, 255).astype(np.uint8)
 
-        # If border is mostly white, assume scale bar is black → invert
-        if is_background_white:
-            binary = ~binary
+        return roi
 
-        return binary.astype(np.uint8) * 255
-
-    def bar_width_estimation(self, binary: np.ndarray) -> int:
-        """
-        Estimate the scale bar width from the binary image.
+    def _compute_gradient(self, image: np.ndarray) -> np.ndarray:
+        """Compute gradient magnitude using Scharr operator.
 
         Args:
-            binary: Binary image
+            image (np.ndarray): Grayscale image.
+
         Returns:
-            Estimated bar width in pixels
+            grad_norm (np.ndarray): Normalized gradient magnitude image.
         """
-        # Get smaller dimension
-        h, w = binary.shape
-        if h < w:
-            proj = np.sum(binary, axis=1)
-        else:
-            proj = np.sum(binary, axis=0)
+        # Pad image to avoid border artifacts
+        image = cv2.copyMakeBorder(image, 1, 1, 1, 1, cv2.BORDER_REPLICATE)
+        gx = cv2.Scharr(image, cv2.CV_32F, 1, 0)
+        gy = cv2.Scharr(image, cv2.CV_32F, 0, 1)
+        # Absolute gradient magnitude
+        grad = cv2.magnitude(gx, gy)
+        # Normalize to 8-bit before thresholding
+        dst = np.empty_like(grad, dtype=np.float32)
+        grad_norm = cv2.normalize(grad, dst, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-        # Count the number of lines with more than 50% pixels on
-        num_lines = np.sum(proj > 0.5 * np.max(proj))
-        return num_lines
+        return grad_norm
 
-    def morphological_cleanup(self, binary: np.ndarray, kernel_size) -> np.ndarray:
-        """
-        Apply morphological operations to clean up the binary image.
+    def _thresholding(self, image: np.ndarray) -> np.ndarray:
+        """Simple Otsu thresholding on normalized gradient magnitude.
 
         Args:
-            binary: Binary image
-            kernel_size: Size of morphological kernel
+            image (np.ndarray): Gradient magnitude image.
 
         Returns:
-            Cleaned binary image
+            edges (np.ndarray): Binary edge image.
         """
-        # Create kernel for morphological operations
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+        _, edges = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return edges
 
-        # Remove small white noise
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-        # Fill small black noise
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
-
-        return cleaned
-
-    def find_largest_comp(self, binary: np.ndarray) -> np.ndarray:
+    def _connected_components(self, image: np.ndarray) -> Tuple[np.ndarray, bool]:
         """
-        Find the largest connected component in the binary image.
+        Run connected components and keep only the largest component after filtering by area and AR.
+        (Not used in the current pipeline because we use edge contours instead.)
 
         Args:
-            binary: Binary image
+            image (np.ndarray): Binary image.
 
         Returns:
-            Binary image with only the largest component
+            clean_cc (np.ndarray): Cleaned binary image with only the selected components.
+            flag (bool): Whether no component passed the aspect ratio filter.
         """
-        # Find connected components
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            binary, connectivity=8
+        # Compute connected components
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            image, connectivity=8
         )
 
-        # If no components or only background, return original
-        if num_labels <= 1:
-            return binary
+        # Filter 1 — remove very small components
+        area_thresh = 0.01 * image.size
+        areas = stats[:, cv2.CC_STAT_AREA]
+        candidates = [i for i in range(1, num_labels) if areas[i] > area_thresh]
 
-        # Find largest component (excluding background)
-        largest_comp = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        if num_labels > 2:
-            _2nd_largest = 1 + np.argsort(stats[1:, cv2.CC_STAT_AREA])[-2]
-            if (
-                stats[largest_comp, cv2.CC_STAT_AREA]
-                < 1.5 * stats[_2nd_largest, cv2.CC_STAT_AREA]
-            ):
-                return binary  # Return original if no dominant component
+        # Filter 2 — long thin shapes (aspect ratio)
+        final_keep = []
+        for i in candidates:
+            w = stats[i, cv2.CC_STAT_WIDTH]
+            h = stats[i, cv2.CC_STAT_HEIGHT]
+            aspect = max(w / h, h / w)
+            if aspect > 3:
+                final_keep.append(i)
 
-        # Create mask for largest component
-        mask = (labels == largest_comp).astype(np.uint8) * 255
+        # Fallback: if nothing passed aspect filter, keep only largest component
+        flag = False
+        if len(final_keep) == 0:
+            largest = np.argmax(areas[1:]) + 1
+            final_keep = [largest]
+            flag = True
 
-        return mask
+        # If largest component dominates by ×3, keep only it
+        if len(final_keep) > 1:
+            largest = max(final_keep, key=lambda i: areas[i])
+            second = sorted(final_keep, key=lambda i: areas[i])[-2]
+            if areas[largest] / areas[second] > 3:
+                final_keep = [largest]
 
-    def skeletonize(self, binary: np.ndarray) -> np.ndarray:
-        """
-        Skeletonize the binary image using thinning algorithm.
+        clean_cc = np.isin(labels, final_keep).astype(np.uint8) * 255
+        return clean_cc, flag
 
-        Args:
-            binary: Binary image
-
-        Returns:
-            Skeletonized binary image
-        """
-        # Make sure the border is background
-        binary[0, :] = 0
-        binary[-1, :] = 0
-        binary[:, 0] = 0
-        binary[:, -1] = 0
-
-        # Apply thinning algorithm
-        skeleton = cv2.ximgproc.thinning(binary)
-        return skeleton
-
-    def find_endpoints(self, skeleton: np.ndarray) -> np.ndarray:
-        """
-        Find scale bar endpoints in the skeletonized image
+    def _get_contours(self, image: np.ndarray) -> Tuple[np.ndarray, bool]:
+        """Find contours in the binary image.
 
         Args:
-            skeleton: Skeletonized binary image
+            image (np.ndarray): Binary image.
 
         Returns:
-            Two endpoints (x1, y1), (x2, y2)
+            mask (np.ndarray): Binary mask with only the selected contours.
+            flag (bool): Whether no contour passed the aspect ratio filter.
         """
-        # Kernel to sum the neighbours
-        kernel = [[1, 1, 1], [1, 0, 1], [1, 1, 1]]
-        # 2D convolution (cast image to int32 to avoid overflow)
-        img_conv = scipy.signal.convolve2d(
-            skeleton.astype(np.int32), kernel, mode="same"
+        contours, _ = cv2.findContours(
+            image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
-        # Pick points where pixel is 255 and neighbours sum 255
-        endpoints = np.stack(np.where((skeleton == 255) & (img_conv == 255)), axis=1)
 
-        if len(endpoints) < 2:
-            raise ValueError(
-                "Less than 2 endpoints detected in skeletonized scale bar."
-            )
-        elif len(endpoints) > 2:
-            # If more than 2 endpoints, pick the two farthest apart
-            dists = np.linalg.norm(endpoints[:, None] - endpoints[None, :], axis=2)
-            np.fill_diagonal(dists, 0)  # Ignore self-distances
-            max_dist_idx = np.unravel_index(np.argmax(dists), dists.shape)
-            endpoints = endpoints[list(max_dist_idx)]
-        else:
-            endpoints = endpoints
+        # Sort contours by area descending
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-        return endpoints
+        # Filter 1 — remove very small contours
+        area_thresh = 0.01 * image.size
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > area_thresh]
 
-    def compute_flat_distance(
-        self, start: Tuple[int, int], end: Tuple[int, int]
+        # Filter 2 — long thin shapes (aspect ratio)
+        filtered_contours = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            aspect = max(w / h, h / w)
+            if aspect > 3:
+                filtered_contours.append(cnt)
+
+        # Fallback: if nothing passed aspect filter, keep only largest contour
+        flag = False
+        if len(filtered_contours) == 0 and len(contours) > 0:
+            filtered_contours = [contours[0]]
+            flag = True
+
+        # If largest contour dominates by ×3, keep only it
+        if len(filtered_contours) > 1:
+            largest = max(filtered_contours, key=cv2.contourArea)
+            second = sorted(filtered_contours, key=cv2.contourArea)[-2]
+            if cv2.contourArea(largest) / cv2.contourArea(second) > 3:
+                filtered_contours = [largest]
+
+        # Create mask from filtered contours
+        mask = np.zeros_like(image, dtype=np.uint8)
+        cv2.drawContours(mask, filtered_contours, -1, color=255, thickness=cv2.FILLED)
+
+        # Keep only the core by eroding slightly (correct the dilation effect of previous steps)
+        kernel_shape = (3, 1) if mask.shape[1] >= mask.shape[0] else (1, 3)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT, kernel_shape
+        )  # erode only on longer side
+        mask = cv2.erode(mask, kernel, iterations=1)
+
+        return mask, flag
+
+    def _pca_length_estimation(
+        self, image: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+        """Estimate length using PCA on the component pixels.
+
+        Args:
+            image (np.ndarray): Binary mask of the scale bar component.
+
+        Returns:
+            p1 (np.ndarray): First endpoint in local ROI coordinates (y, x).
+            p2 (np.ndarray): Second endpoint in local ROI coordinates (y, x).
+            proj (np.ndarray): Projections of points onto principal axis.
+        """
+        # Get coordinates of non-zero pixels
+        pts = np.column_stack(np.where(image > 0))
+
+        if len(pts) < 2:
+            logger.warning("Not enough masked pixels for PCA length estimation.")
+            return None, None, None
+
+        # PCA
+        mean = pts.mean(axis=0)
+        pts_centered = pts - mean
+        _, _, vh = np.linalg.svd(pts_centered, full_matrices=False)
+        direction = vh[0]
+
+        # Project points onto the principal axis and find extremums
+        proj = pts_centered @ direction
+
+        # Remove outliers if any (assume uniform distribution along the bar)
+        proj_filtered = proj[
+            (proj >= np.median(proj) - 2 * np.std(proj))
+            & (proj <= np.median(proj) + 2 * np.std(proj))
+        ]
+        t_min, t_max = proj_filtered.min(), proj_filtered.max()
+
+        p1 = mean + t_min * direction
+        p2 = mean + t_max * direction
+
+        return p1, p2, proj
+
+    def _compute_endpoints(
+        self, p1: np.ndarray, p2: np.ndarray, ext_bbox: Tuple[int, int, int, int]
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        """Compute global image coordinates of the endpoints.
+
+        Args:
+            p1 (np.ndarray): First endpoint in local ROI coordinates (y, x).
+            p2 (np.ndarray): Second endpoint in local ROI coordinates (y, x).
+            ext_bbox (Tuple[int, int, int, int]): Extended bounding box (x1, y1, x2, y2).
+
+        Returns:
+            p1_global (Tuple[float, float]): First endpoint in global image coordinates (x, y).
+            p2_global (Tuple[float, float]): Second endpoint in global image coordinates (x, y).
+        """
+        x1, y1, _, _ = ext_bbox
+
+        p1_global = (p1[1] + x1, p1[0] + y1)  # (x, y)
+        p2_global = (p2[1] + x1, p2[0] + y1)  # (x, y)
+
+        return p1_global, p2_global
+
+    def _compute_flat_distance(
+        self, start: Tuple[float, float], end: Tuple[float, float]
     ) -> float:
         """
         Compute the flat (purely horizontal/vertical) distance between two points.
 
         Args:
-            start: Starting point (x1, y1)
-            end: Ending point (x2, y2)
+            start (Tuple[float, float]): Starting point (x, y).
+            end (Tuple[float, float]): Ending point (x, y).
 
         Returns:
-            Distance in pixels
+            distance (float): Flat distance between the two points.
         """
         h_dist = abs(end[0] - start[0])
         v_dist = abs(end[1] - start[1])
-        return max(h_dist, v_dist)
+        return float(max(h_dist, v_dist))
 
     def visualize_endpoint_detection(
         self,
         image: np.ndarray,
-        xywh: Tuple[int, int, int, int],
+        bbox: Tuple[int, int, int, int],
         results: Dict[str, Any],
         save_path: Optional[str] = None,
     ) -> None:
@@ -360,93 +416,100 @@ class ScalebarProcessor:
         Visualize the endpoint detection process and results.
 
         Args:
-            image: Original image
-            xywh: padded bounding box (x, y, width, height)
-            results: Results from localize_scalebar_endpoints
-            save_path: Path to save visualization (optional)
+            image (np.ndarray): Original image.
+            bbox (Tuple[int, int, int, int]): Bounding box around the scale bar.
+            results (Dict[str, Any]): Dictionary containing intermediate results, including:
+                - "pixel_length": Estimated pixel length of the scale bar.
+                - "bbox_ext": Extended bounding box.
+                - "gradient_mag": Gradient magnitude image.
+                - "binary_image": Binary edge image.
+                - "filled_contour": Binary mask of the largest component.
+                - "pca_projection": PCA projections of component pixels.
+                - "endpoints": Detected endpoints.
+            save_path (Optional[str]): Path to save the visualization. If None, display it.
         """
-        x, y, w, h = xywh
-        roi = image[y : y + h, x : x + w]
-
-        fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
         # Full image
         axes[0, 0].imshow(image, cmap="gray")
 
         # Draw bounding box
-        rect = Rectangle((x, y), w, h, linewidth=1, edgecolor="blue", facecolor="none")
+        rect = Rectangle(
+            (bbox[0], bbox[1]),
+            bbox[2] - bbox[0],
+            bbox[3] - bbox[1],
+            linewidth=1,
+            edgecolor="blue",
+            facecolor="none",
+        )
         axes[0, 0].add_patch(rect)
         axes[0, 0].set_title("Full Image Detection")
         axes[0, 0].axis("off")
 
-        # Original ROI
-        axes[0, 1].imshow(roi, cmap="gray")
-        axes[0, 1].set_title("Original ROI")
-        axes[0, 1].axis("off")
-
-        # Best channel
-        if "best_channel" in results and results["best_channel"] is not None:
-            # Histogram of best channel
-            axes[0, 2].hist(
-                results["best_channel"].ravel(), bins=256, color="gray", alpha=0.7
-            )
-            axes[0, 2].set_title("Best Channel Distribution")
-            axes[0, 2].set_xlabel("Pixel Intensity")
-            axes[0, 2].set_ylabel("Frequency")
-            axes[0, 2].grid(True)
-            axes[0, 2].set_xlim(0, 255)
-
-            # Show best channel image
-            axes[1, 0].imshow(results["best_channel"], cmap="gray")
-            axes[1, 0].set_title("Best Channel")
-            axes[1, 0].axis("off")
+        # Gradient magnitude
+        if results.get("gradient_mag") is not None:
+            axes[0, 1].imshow(results["gradient_mag"], cmap="gray")
+            axes[0, 1].set_title("Gradient Magnitude")
+            axes[0, 1].axis("off")
 
         # Binary image
-        if "binary_image" in results and results["binary_image"] is not None:
-            axes[1, 1].imshow(results["binary_image"], cmap="gray")
-            axes[1, 1].set_title("Binary Image")
-            axes[1, 1].axis("off")
-
-        # Cleaned image
-        if "cleaned_image" in results and results["cleaned_image"] is not None:
-            axes[1, 2].imshow(results["cleaned_image"], cmap="gray")
-            axes[1, 2].set_title("Cleaned Image")
-            axes[1, 2].axis("off")
+        if results.get("binary_image") is not None:
+            axes[0, 2].imshow(results["binary_image"], cmap="gray")
+            axes[0, 2].set_title("Binary Image")
+            axes[0, 2].axis("off")
 
         # Largest component
-        if "largest_comp" in results and results["largest_comp"] is not None:
-            axes[2, 0].imshow(results["largest_comp"], cmap="gray")
-            axes[2, 0].set_title("Largest Component")
-            axes[2, 0].axis("off")
+        if results.get("filled_contour") is not None:
+            axes[1, 0].imshow(results["filled_contour"], cmap="gray")
+            axes[1, 0].set_title("Largest Component")
+            axes[1, 0].axis("off")
 
-        # Skeleton
-        if "skeleton" in results and results["skeleton"] is not None:
-            axes[2, 1].imshow(results["skeleton"], cmap="gray")
-            axes[2, 1].set_title("Skeleton")
-            axes[2, 1].axis("off")
+        # Cleaned image
+        if results.get("pca_projection") is not None:
+            # Plot histogram of PCA projections (normalize so that max is 1)
+            axes[1, 1].hist(results["pca_projection"], bins=30, color="gray")
+            axes[1, 1].axvline(
+                np.median(results["pca_projection"])
+                - 2 * np.std(results["pca_projection"]),
+                np.median(results["pca_projection"])
+                + 2 * np.std(results["pca_projection"]),
+                color="red",
+                linestyle="dashed",
+                label="Outlier Thresholds",
+            )
+            axes[1, 1].set_title("PCA Projection Histogram")
+            axes[1, 1].set_xlabel("Projection Value")
+            axes[1, 1].set_ylabel("Frequency")
+            # Replace the tick labels with normalized values
+            max_count = axes[1, 1].get_ylim()[1]
+            axes[1, 1].set_yticks(np.linspace(0, max_count, num=5))
+            axes[1, 1].set_yticklabels(np.linspace(0, 1, num=5).round(2))
+            axes[1, 1].legend()
 
         # Result visualization
-        axes[2, 2].imshow(roi, cmap="gray")
-        if results["endpoints"]:
+        x_min, y_min, x_max, y_max = results["bbox_ext"]
+        roi = image[int(y_min) : int(y_max), int(x_min) : int(x_max)]
+
+        axes[1, 2].imshow(roi, cmap="gray")
+        if results.get("endpoints") is not None:
             start_pt, end_pt = results["endpoints"]
             # Convert back to ROI coordinates
-            rel_start = (start_pt[0] - x, start_pt[1] - y)
-            rel_end = (end_pt[0] - x, end_pt[1] - y)
+            rel_start = (start_pt[0] - x_min, start_pt[1] - y_min)
+            rel_end = (end_pt[0] - x_min, end_pt[1] - y_min)
 
-            axes[2, 2].plot(
+            axes[1, 2].plot(
                 [rel_start[0], rel_end[0]],
                 [rel_start[1], rel_end[1]],
                 "r-",
-                linewidth=3,
+                linewidth=2,
                 label="Detected scale bar",
             )
-            axes[2, 2].plot(
-                rel_start[0], rel_start[1], "go", markersize=8, label="Start"
+            axes[1, 2].plot(
+                rel_start[0], rel_start[1], "go", markersize=3, label="Start"
             )
-            axes[2, 2].plot(rel_end[0], rel_end[1], "ro", markersize=8, label="End")
-            axes[2, 2].legend()
-
-        axes[2, 2].set_title(f'Result (Length: {results["pixel_length"]:.1f}px)')
+            axes[1, 2].plot(rel_end[0], rel_end[1], "ro", markersize=3, label="End")
+            axes[1, 2].legend()
+        axes[1, 2].set_title(f'Result (Length: {results["pixel_length"]:.1f}px)')
 
         plt.tight_layout()
 

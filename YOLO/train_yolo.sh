@@ -17,10 +17,10 @@ source ~/.bashrc
 source ~/scale/bin/activate
 
 # Step 1: Get the data
-python src/get_data.py --path original1/scalebar-dataset --data_dir data
+python ../YOLO/get_data.py --path original1/scalebar-dataset --data_dir data
 
 # Step 2: Convert JSONs to YOLO format
-python src/convert_jsons_to_yolo.py --data_dir data --validate
+python ../YOLO/convert_jsons_to_yolo.py --data_dir data --validate
 
 # Step 3: Train the YOLO model
-python src/train_yolo.py --data_yaml data/data.yaml --model_name yolov8m.pt --epochs 500 --batch 16 --device 0
+python ../YOLO/train_yolo.py --data_yaml data/data.yaml --model_name yolov8m.pt --epochs 500 --batch 16 --device 0

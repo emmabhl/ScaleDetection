@@ -57,9 +57,9 @@ class ScaleBarClassifier:
         self.min_match_count = min_match_count
 
         # ORB + BFMatcher (knn + ratio test)
-        self.orb = cv2.ORB_create(
+        self.orb = cv2.ORB_create(  # pyright: ignore[reportAttributeAccessIssue]
             nfeatures=self.nfeatures
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        )
         self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
         # Loaded templates (dict: scale_type -> list of template_info dicts)
@@ -134,9 +134,9 @@ class ScaleBarClassifier:
         """
         # Convert to grayscale if needed
         if len(target_image.shape) == 3:
-            target_gray = cv2.cvtColor(target_image, cv2.COLOR_BGR2GRAY)
+            target_gray = cv2.cvtColor(target_image, cv2.COLOR_RGB2GRAY).copy()
         else:
-            target_gray = target_image
+            target_gray = target_image.copy()
 
         kp2, des2 = self.orb.detectAndCompute(target_gray, None)
         if des2 is None or len(kp2) == 0:
@@ -247,7 +247,7 @@ class ScaleBarClassifier:
 
     def save_results(
         self,
-        target_img: np.ndarray,
+        image: np.ndarray,
         matches: Optional[List[Dict[str, Any]]],
         save_path: Optional[str] = None,
     ) -> None:
@@ -261,6 +261,7 @@ class ScaleBarClassifier:
         Returns:
             None: Displays or writes an image depending on `save_path`.
         """
+        img = image.copy()
         if matches is None or len(matches) == 0:
             return
         try:
@@ -274,7 +275,7 @@ class ScaleBarClassifier:
                     # Draw bounding box on image for visualization
                     bbox_pts = bbox
                     cv2.polylines(
-                        target_img,
+                        img,
                         [bbox_pts.reshape(-1, 2)],
                         isClosed=True,
                         color=cm[i % len(cm)],
@@ -282,7 +283,7 @@ class ScaleBarClassifier:
                     )
                     legend = f"{m['scale_type']} ({m['score']:.2f})"
                     cv2.putText(
-                        target_img,
+                        img,
                         legend,
                         (bbox_pts[0][0], bbox_pts[0][1] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -291,16 +292,14 @@ class ScaleBarClassifier:
                         2,
                     )
 
-            if save_path:
-                plt.imshow(cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB))
-                plt.title("Classification Results")
-                plt.axis("off")
+            plt.imshow(img)
+            plt.title("Classification Results")
+            plt.axis("off")
+            if save_path is not None:
                 plt.savefig(save_path)
                 plt.close()
             else:
-                plt.imshow(cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB))
-                plt.title("Classification Results")
-                plt.axis("off")
                 plt.show()
+
         except Exception as e:
             log.error(f"Error in save_results: {e}")

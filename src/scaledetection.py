@@ -29,7 +29,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 from tqdm import tqdm
-from transformers import AutoModelForObjectDetection
 from ultralytics import YOLO
 
 from atypical_scalebars import (
@@ -82,7 +81,7 @@ class ScaleDetectionPipeline:
             os.makedirs(self.debug_dir, exist_ok=True)
 
     def process_yolo_detections(
-        self, image: np.ndarray, detection_results: object, plot_path: str
+        self, image: np.ndarray, detection_results: Any, plot_path: str
     ) -> Scale:
         """Process YOLO detections: post-process scalebars, run OCR and compute scale.
 
@@ -116,15 +115,13 @@ class ScaleDetectionPipeline:
             )
 
         # ---------- SCALEBAR DETECTION & MEASUREMENT ----------
-        bar_box = self.prepare_bbox(image, bar_box, padding_percent=0.1)
         scalebar_detection = self.scalebar_processor.localize_scalebar_endpoints(
             image, bar_box, plot_path=plot_path
         )
 
         # --------- TEXT LABEL DETECTION & RECOGNITION ---------
-        label_box = self.prepare_bbox(image, label_box, padding_percent=0.1)
         label_detection = self.ocr_processor.extract_text_labels(
-            image, label_box, reversed=False, plot_path=plot_path
+            image, label_box, plot_path=plot_path
         )
 
         # ----------- MATCHING & RESULTS PREPARATION -----------
@@ -157,14 +154,9 @@ class ScaleDetectionPipeline:
             )
 
             # --------- TEXT LABEL DETECTION & RECOGNITION ---------
-            bbox_xywh = (
-                bbox[0][0],
-                bbox[0][1],
-                bbox[2][0] - bbox[0][0],
-                bbox[2][1] - bbox[0][1],
-            )
+            bbox_xyxy = np.array([bbox[0][0], bbox[0][1], bbox[2][0], bbox[2][1]])
             label_detection = self.ocr_processor.extract_text_labels(
-                image, bbox_xywh, reversed=True, plot_path=plot_path
+                image, bbox_xyxy, plot_path=plot_path
             )
 
             # ----------- MATCHING & RESULTS PREPARATION -----------
@@ -203,34 +195,6 @@ class ScaleDetectionPipeline:
 
         scale.type_ = detection_results["scale_type"]
         return scale
-
-    def prepare_bbox(
-        self, image: np.ndarray, box: np.ndarray, padding_percent: float
-    ) -> Tuple[int, int, int, int]:
-        """Convert an (x_min,y_min,x_max,y_max) box to a padded (x,y,w,h) ROI.
-
-        Args:
-            image (np.ndarray): Full input image used to clip padding to image bounds.
-            box (np.ndarray): YOLO box in (x_min, y_min, x_max, y_max) format.
-            padding_percent (float): Fractional padding to add around the detected box.
-
-        Returns:
-            roi (Tuple[int,int,int,int]): Padded ROI as (x, y, w, h).
-        """
-        # Convert box to (x, y, w, h) format
-        x_min, y_min, x_max, y_max = box
-
-        # Increase ROI to include some context and ensure full scale bar is captured
-        h = y_max - y_min
-        w = x_max - x_min
-        hpad = padding_percent * h
-        vpad = padding_percent * w
-        x = int(max(0, x_min - vpad))
-        y = int(max(0, y_min - hpad))
-        w = int(min(image.shape[1] - x, w + 2 * vpad))
-        h = int(min(image.shape[0] - y, h + 2 * hpad))
-
-        return (x, y, w, h)
 
     def match_text_to_bars(
         self, boxes: np.ndarray, classes: np.ndarray, scores: np.ndarray
@@ -349,9 +313,9 @@ class ScaleDetectionPipeline:
                 measured_scale_length=float(px_len) if px_len else None,
                 declared_scale_length=float(value) if value else None,
                 units=unit,
-                pixel_to_mm_ratio=0.0,
+                pixel_to_mm_ratio=2.95 * 10e-6,  # K
                 scale_bar_confidence=float(bar_score),
-                scale_length_flag=scalebar_detection.flag,
+                scale_length_flag=bool(scalebar_detection.flag),
                 text_label_confidence=float(label_score),
                 orientation_confidence=1.0,
             )
@@ -376,6 +340,7 @@ class ScaleDetectionPipeline:
             units=unit,
             pixel_to_mm_ratio=float(mm_per_pixel),
             scale_bar_confidence=float(bar_score),
+            scale_length_flag=bool(scalebar_detection.flag),
             text_label_confidence=float(label_score),
             orientation_confidence=1.0,
         )
@@ -514,13 +479,10 @@ def main():
 
     # Process images sequentially
     for img_path in tqdm(image_paths, desc="Processing images"):
-        image = cv2.imread(img_path)
+        image = cv2.imread(img_path, cv2.IMREAD_COLOR_RGB)
         if image is None:
             log.warning(f"Could not read image {img_path}, skipping.")
             continue
-
-        # Keep your previous conversion to RGB (YOLO/other modules may expect RGB)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         image_name = os.path.splitext(os.path.basename(img_path))[0]
         # per-image base for plots and outputs
@@ -542,7 +504,11 @@ def main():
         if not matches:
             log.info("No atypical scale bar detected, proceeding with normal detection")
             try:
-                yolo_results = model.predict(image, conf=args.yolo_conf, verbose=False)
+                yolo_results = model.predict(
+                    cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
+                    conf=args.yolo_conf,
+                    verbose=False,
+                )
             except Exception as e:
                 log.error(f"Error running YOLO on {img_path}: {e}")
                 continue

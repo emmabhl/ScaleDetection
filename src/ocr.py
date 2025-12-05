@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
+from inflect import unit
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon, Rectangle
 import numpy as np
 from paddleocr import PaddleOCR
 
@@ -40,9 +42,8 @@ class LabelDetection:
 
     text: str
     confidence: float
-    bbox: Optional[Tuple[int, int, int, int]]  # (x, y, w, h)
+    bbox: Optional[np.ndarray]  # (x_min, y_min, x_max, y_max)
     parsed_value: Optional[float] = None
-    parsed_unit: Optional[str] = None
     normalized_unit: Optional[str] = None
 
 
@@ -51,50 +52,17 @@ class TextParser:
 
     # Regex patterns for different unit formats
     UNIT_PATTERNS = {
-        "micrometer": r"([0-9]+(?:[.,][0-9]+)?)\s*(μm|um|µm|μ|u|micrometer|micrometre)",
-        "nanometer": r"([0-9]+(?:[.,][0-9]+)?)\s*(nm|nanometer|nanometre)",
-        "millimeter": r"([0-9]+(?:[.,][0-9]+)?)\s*(mm|millimeter|millimetre)",
-        "centimeter": r"([0-9]+(?:[.,][0-9]+)?)\s*(cm|centimeter|centimetre)",
-        "meter": r"([0-9]+(?:[.,][0-9]+)?)\s*(m|meter|metre)",
-        "generic": r"([0-9]+(?:[.,][0-9]+)?)\s*([a-zA-Zμµ]+)",
-    }
-
-    REVERSE_UNIT_PATTERNS = {
-        "micrometer": r"(μm|um|µm|μ|u|micrometer|micrometre)\s*([0-9]+(?:[.,][0-9]+)?)",
-        "nanometer": r"(nm|nanometer|nanometre)\s*([0-9]+(?:[.,][0-9]+)?)",
-        "millimeter": r"(mm|millimeter|millimetre)\s*([0-9]+(?:[.,][0-9]+)?)",
-        "centimeter": r"(cm|centimeter|centimetre)\s*([0-9]+(?:[.,][0-9]+)?)",
-        "meter": r"(m|meter|metre)\s*([0-9]+(?:[.,][0-9]+)?)",
-        "generic": r"([a-zA-Zμµ]+)\s*([0-9]+(?:[.,][0-9]+)?)",
-    }
-
-    # Unit normalization mapping
-    UNIT_NORMALIZATION = {
-        "um": "um",
-        "μm": "um",
-        "µm": "um",
-        "μ": "um",
-        "u": "um",
-        "micrometer": "um",
-        "micrometre": "um",
-        "nm": "nm",
-        "nanometer": "nm",
-        "nanometre": "nm",
-        "mm": "mm",
-        "millimeter": "mm",
-        "millimetre": "mm",
-        "cm": "cm",
-        "centimeter": "cm",
-        "centimetre": "cm",
-        "m": "mm",
-        "meter": "mm",
-        "metre": "mm",  # /!\ Convert meters to mm
+        "um": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(μm|um|µm|micrometer|micrometre)(?:\b|\d)).*$",
+        "nm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(nm|nanometer|nanometre)(?:\b|\d)).*$",
+        "mm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(mm|millimeter|millimetre|m)(?:\b|\d)).*$",
+        "cm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(cm|centimeter|centimetre)(?:\b|\d)).*$",
     }
 
     @classmethod
     def parse_text(
-        cls, text: str, reversed: bool
-    ) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+        cls,
+        text: str,
+    ) -> Tuple[Optional[float], Optional[str]]:
         """Parse a string to extract numeric value and unit.
 
         Args:
@@ -102,32 +70,34 @@ class TextParser:
             reversed (bool): If True, apply patterns where the unit precedes the value.
 
         Returns:
-            result (Tuple[Optional[float], Optional[str], Optional[str]]):
-                (value, original_unit, normalized_unit) or (None, None, None) on failure.
+            result (Tuple[Optional[float], Optional[str]]):
+                (value, normalized_unit) or (None, None) on failure.
         """
-        text = text.strip()
-
-        patterns = cls.REVERSE_UNIT_PATTERNS if reversed else cls.UNIT_PATTERNS
+        patterns = cls.UNIT_PATTERNS
 
         # Check each pattern in order of specificity
         for unit_type, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                value_str = match.group(1) if not reversed else match.group(2)
-                unit = match.group(2) if not reversed else match.group(1)
+                value_str = re.findall(r"\d+[.,]?\d*", text)
+                unit_str = unit_type
 
                 # Convert value to float (handle both comma and dot as decimal separator)
-                try:
-                    value = float(value_str.replace(",", "."))
-                except ValueError:
-                    continue
+                # convert found numeric substrings to floats (handle comma as decimal sep)
+                def _to_float(s):
+                    try:
+                        return float(s.replace(",", "."))
+                    except (ValueError, AttributeError):
+                        return None
 
-                # Normalize unit
-                normalized_unit = cls.UNIT_NORMALIZATION.get(unit.lower(), unit.lower())
+                max_val = max(
+                    (n for n in (_to_float(s) for s in value_str) if n is not None),
+                    default=0.0,
+                )
 
-                return value, unit, normalized_unit
+                return max_val, unit_str
 
-        return None, None, None
+        return None, None
 
     @classmethod
     def is_plausible_value(cls, value: float, unit: Optional[str]) -> bool:
@@ -155,7 +125,7 @@ class TextParser:
 class OCRProcessor:
     """OCR processor with multiple backend support."""
 
-    def __init__(self):
+    def __init__(self, confidence_threshold: float = 0.25):
         """
         Initialize OCR processor.
 
@@ -163,61 +133,69 @@ class OCRProcessor:
             confidence_threshold: Minimum confidence for detections
         """
         self.model = MODEL
+        self.conf_thr = confidence_threshold
 
     def extract_text_labels(
         self,
         image: np.ndarray,
-        bbox: Tuple[int, int, int, int],
-        reversed: bool = False,
+        bbox: np.ndarray,
         plot_path: Optional[str] = None,
     ) -> LabelDetection:
         """Run OCR on a cropped label ROI and parse numeric value + unit.
 
         Args:
             image (np.ndarray): Full input image (H,W,C or H,W).
-            bbox (Tuple[int,int,int,int]): ROI as (x, y, w, h) to apply OCR on.
+            bbox (np.ndarray): ROI as (x_min, y_min, x_max, y_max) to apply OCR on.
             reversed (bool, optional): If True, use reversed parsing patterns. Defaults to False.
             plot_path (Optional[str], optional): Path prefix to save OCR debug image. Defaults to None.
 
         Returns:
             detection (LabelDetection): Parsed OCR result with confidence and optional parsed value/unit.
         """
-        # Apply OCR to text label regions only
-        x, y, w, h = bbox
-
-        roi = image[y : y + h, x : x + w]
-
-        if roi.size == 0:
-            return LabelDetection(text="", confidence=0.0, bbox=None)
-
         try:
+            # Apply OCR to text label regions only
+            x_min, y_min, x_max, y_max = bbox
+
+            # Extract ROI with some padding
+            roi = image[
+                int(max(y_min - 20, 0)) : int(min(y_max + 20, image.shape[0])),
+                int(max(x_min - 20, 0)) : int(min(x_max + 20, image.shape[1])),
+            ]
+            if roi.size == 0:
+                return LabelDetection(text="", confidence=0.0, bbox=None)
+
+            roi = self.preprocess_image(roi)
+
             # OCR prediction
-            output = self.model.predict(roi)
+            output = self.model.predict(roi)[0]
 
-            text = "".join(output[0]["rec_texts"])
-            conf = np.min(output[0]["rec_scores"])
-
-            log.info(f"Detected text: {text} with confidence {conf}")
             if plot_path is not None:
-                output[0].save_to_img(plot_path + "_ocr.png")
+                visualize_output(output, plot_path + "_ocr.png")
 
             # Parse text to get value and unit
-            value, unit, norm_unit = TextParser.parse_text(text, reversed=reversed)
+            text = [
+                text
+                for text, score in zip(output["rec_texts"], output["rec_scores"])
+                if score >= self.conf_thr and text not in {"0", "O"}
+            ]
+            text = " ".join(text).strip()
+            value, unit = TextParser.parse_text(text)
 
             if (
                 value is None
                 or unit is None
-                or not TextParser.is_plausible_value(value, norm_unit)
+                or not TextParser.is_plausible_value(value, unit)
             ):
                 return LabelDetection(text=text, confidence=0.0, bbox=bbox)
 
             return LabelDetection(
                 text=text,
-                confidence=conf,
+                confidence=np.min(
+                    [s for s in output["rec_scores"] if s >= self.conf_thr]
+                ),
                 bbox=bbox,
                 parsed_value=value,
-                parsed_unit=unit,
-                normalized_unit=norm_unit,
+                normalized_unit=unit,
             )
 
         except Exception as e:
@@ -234,10 +212,7 @@ class OCRProcessor:
             preprocessed (np.ndarray): Grayscale, contrast-enhanced and denoised image.
         """
         # Convert to grayscale if needed
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = image.copy()
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         # Resize if too small (minimum height of 32 pixels)
         if gray.shape[0] < 32:
@@ -246,10 +221,163 @@ class OCRProcessor:
             gray = cv2.resize(gray, (new_width, 32), interpolation=cv2.INTER_CUBIC)
 
         # Enhance contrast
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        gray = clahe.apply(gray)
-
-        # Denoise
-        gray = cv2.medianBlur(gray, 3)
+        p2, p98 = np.percentile(gray, (2, 98))
+        gray = np.clip((gray - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
 
         return gray
+
+
+def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
+    """
+    Create a 3-panel PNG:
+        [input image] [image with bounding boxes] [legend with recognized text (small list)]
+    Save to plot_path (string).
+    """
+    # --- get image from common keys ---
+    dp = res.get("doc_preprocessor_res", {}) if isinstance(res, dict) else {}
+    img = None
+    for key in ("output_img", "input_img", "rot_img"):
+        cand = dp.get(key)
+        if isinstance(cand, np.ndarray) and getattr(cand, "ndim", 0) >= 2:
+            img = cand
+            break
+    if img is None:
+        for key in ("img", "res_img", "input_img", "ori_img", "image"):
+            cand = res.get(key)
+            if isinstance(cand, np.ndarray) and getattr(cand, "ndim", 0) >= 2:
+                img = cand
+                break
+    if img is None:
+        log.warning("No valid image found in OCR result.")
+        return
+
+    # Normalize dtype/shape
+    if not np.issubdtype(img.dtype, np.integer):
+        img = (
+            (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8)
+            if img.dtype == float
+            else img.astype(np.uint8)
+        )
+    if img.ndim == 3 and img.shape[2] == 4:
+        img = img[:, :, :3]
+    h, w = img.shape[:2]
+
+    # --- get recognized texts and boxes/polys ---
+    rec_texts = res.get("rec_texts") or []
+    rec_scores = res.get("rec_scores") or []
+    rec_boxes = res.get("rec_boxes")
+    boxes = None
+
+    # If rec_boxes is a numpy array, use it (expected shape Nx4: x1,y1,x2,y2)
+    if (
+        isinstance(rec_boxes, np.ndarray)
+        and rec_boxes.ndim == 2
+        and rec_boxes.shape[1] >= 4
+    ):
+        boxes = rec_boxes.astype(float)
+    else:
+        # fallback: build boxes from rec_polys by taking bounding rectangle
+        rec_polys = res.get("rec_polys") or res.get("dt_polys") or []
+        bxs = []
+        for poly in rec_polys:
+            try:
+                arr = np.asarray(poly, dtype=float)
+                if arr.ndim == 2 and arr.size:
+                    x_min, y_min = arr[:, 0].min(), arr[:, 1].min()
+                    x_max, y_max = arr[:, 0].max(), arr[:, 1].max()
+                    bxs.append([x_min, y_min, x_max, y_max])
+            except Exception:
+                continue
+        if bxs:
+            boxes = np.array(bxs, dtype=float)
+
+    # --- plotting ---
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=(14, max(4, h * 14 / max(w, 1))),
+        gridspec_kw={"width_ratios": [1.1, 1.1, 0.6]},
+    )
+    ax_in, ax_boxes, ax_legend = axes
+
+    # left: input image
+    ax_in.imshow(img)
+    ax_in.set_title("Input")
+    ax_in.axis("off")
+
+    # middle: image with bounding boxes
+    ax_boxes.imshow(img)
+    ax_boxes.set_title("Recognized boxes")
+    ax_boxes.axis("off")
+    if boxes is not None and isinstance(boxes, np.ndarray) and boxes.size:
+        for i, b in enumerate(boxes):
+            x1, y1, x2, y2 = b[:4]
+            # clip to image bounds
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w - 1, x2), min(h - 1, y2)
+            if x2 > x1 and y2 > y1:
+                rect = Rectangle(
+                    (x1, y1),
+                    x2 - x1,
+                    y2 - y1,
+                    linewidth=1.2,
+                    edgecolor="yellow",
+                    facecolor="none",
+                )
+                ax_boxes.add_patch(rect)
+                # small index label
+                ax_boxes.text(
+                    x1 + 2,
+                    y1 + 2,
+                    str(i + 1),
+                    fontsize=7,
+                    color="black",
+                    bbox=dict(facecolor="yellow", edgecolor="none", pad=0.2, alpha=0.8),
+                )
+
+    # right: legend with recognized texts (compact, centered, enlarged)
+    ax_legend.axis("off")
+    ax_legend.set_title("Recognized text")
+
+    lines = []
+    n = max(len(rec_texts), 0)
+    for i in range(n):
+        txt = rec_texts[i] if i < len(rec_texts) else ""
+        score = rec_scores[i] if i < len(rec_scores) else None
+        label = f"{txt}"
+        if score is not None:
+            label += f" ({score:.2f})"
+        lines.append(label)
+
+    if not lines:
+        ax_legend.text(
+            0.5, 0.5, "No recognized\ntext", ha="center", va="center", fontsize=36
+        )
+    else:
+        # vertical stacking
+        line_height = 0.1  # adjust for huge font
+        y = 0.9
+        for line in lines:
+            ax_legend.text(
+                0.5,
+                y,
+                line,
+                transform=ax_legend.transAxes,
+                fontsize=36,
+                ha="center",
+                va="center",
+                wrap=True,
+            )
+            y -= line_height
+            if y < 0.05:
+                break
+
+    # tighten and save
+    plt.tight_layout()
+    try:
+        fig.savefig(str(plot_path), bbox_inches="tight", pad_inches=0.1)
+    except Exception as e:
+        log.error("Failed to save subplot visualization: %s", e)
+    finally:
+        plt.close(fig)
