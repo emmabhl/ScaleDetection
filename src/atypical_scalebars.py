@@ -50,7 +50,8 @@ def extract_white_horizontal_shape(
         flag = False
         # 1) Crop and convert to grayscale
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
-        image = image[y1:y3, x1:x2]
+        bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
+        image = image[bbox_xyxy[1]:image.shape[0], bbox_xyxy[0]:image.shape[1]]
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
         # 2) Edge detection to detect black rectangle outline
@@ -63,9 +64,12 @@ def extract_white_horizontal_shape(
         rect_contour = None
         max_area = 0
         for cnt in contours:
+            # close contour if small gaps
+            cnt = cv2.convexHull(cnt)
+            
             # approximate polygon
             peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+            approx = cv2.approxPolyDP(cnt, 0.04 * peri, False)
 
             # keep 4-sided shapes
             if len(approx) == 4:
@@ -78,7 +82,7 @@ def extract_white_horizontal_shape(
             # Fallback: use bounding box of largest contour (but make sure the rectangle is not too small nor too large)
             largest_cnt = max(contours, key=cv2.contourArea)
             x, y, w, h = cv2.boundingRect(largest_cnt)
-            if w > 0.5 * (x3 - x1) and h > 0.5 * (y3 - y1):
+            if w > 0.5 * (bbox_xyxy[2] - bbox_xyxy[0]) and h > 0.5 * (bbox_xyxy[3] - bbox_xyxy[1]):
                 crop = gray[
                     y:, x:
                 ]  # Crop from the top-left corner of the box to the image corner
@@ -100,9 +104,7 @@ def extract_white_horizontal_shape(
         )
 
         # 5) Morphological operations to clean noise (keep long horizontal shapes & thicken them)
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_RECT, ((crop.shape[1] // 4) | 1, 1)
-        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ((crop.shape[1] // 4) | 1, 1))
         cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1))
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_DILATE, kernel)
@@ -142,6 +144,8 @@ def extract_white_horizontal_shape(
                 if contours
                 else 0.0
             )
+            start = (crop.shape[0] // 2, 0)
+            end = (crop.shape[0] // 2, crop.shape[1])
             if length <= 0.5 * crop.shape[1]:
                 logger.warning(
                     "No shape found with sufficient length. Using the full crop width."
@@ -163,9 +167,9 @@ def extract_white_horizontal_shape(
             )
 
         return ScalebarDetection(
-            bbox=np.array([x1, y1, x2, y3]) if candidates else np.zeros((4,)),
+            bbox=np.array(bbox_xyxy) if candidates else np.zeros((4,)),
             pixel_length=length,
-            endpoints=[(start[1] + x1, start[0] + y1), (end[1] + x1, end[0] + y1)],
+            endpoints=[(start[1] + bbox_xyxy[0], start[0] + bbox_xyxy[1]), (end[1] + bbox_xyxy[0], end[0] + bbox_xyxy[1])],
             flag=flag,
         )
 
@@ -187,7 +191,7 @@ def extract_white_horizontal_shape(
             )
 
         return ScalebarDetection(
-            bbox=np.array([x1, y1, x2, y3]) if bbox is not None else np.zeros((4,)),
+            bbox=np.array(bbox_xyxy) if bbox is not None else np.zeros((4,)),
             pixel_length=0.0,
             endpoints=None,
             flag=flag,
@@ -216,7 +220,8 @@ def extract_black_vertical_lines(
     try:
         # 1) Convert to grayscale, increase contrast, invert colors and pad
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
-        roi = image[y1:y3, x1:x2]
+        bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
+        roi = image[bbox_xyxy[1]:image.shape[0], bbox_xyxy[0]:image.shape[1]]
         roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
         p2, p98 = np.percentile(roi, (2, 98))
         roi = cv2.normalize(

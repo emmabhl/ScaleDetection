@@ -1,0 +1,25 @@
+meta
+Microplate                 5152368
+Lateral                       1969
+Dorsal                         952
+TrackSLR                       730
+Gall                           490
+Genitalia                       17
+Head                            11
+Wing                             8
+Ventral                          7
+Specimen                         6
+Thorax                           6
+Eggs                             2
+Frontal                          2
+Larva                            2
+palpa retrolateral               1
+Dorso-lateral                    1
+Abdomen                          1
+Lateral head and thorax          1
+Dorsal head and thorax           1
+Ventral head and thorax          1
+Dorsolateral head                1
+Frontal head                     1
+Palp ventral                     1
+Name: count, dtype: int64

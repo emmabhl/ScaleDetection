@@ -1,0 +1,11 @@
+photographer
+CBG Robotic Imager       5145248        Keyence
+CBG Photography Group      10567        individual: scalebar, none
+CBG Robotic Rig              618        Rig: scalebar
+John Reaume                   63
+Santiago Jaume                45
+Donald Hobern                 18
+Michael Sharkey               11
+M. J. Sharkey                  6
+Gergin Blagoev                 2
+Name: count, dtype: int64

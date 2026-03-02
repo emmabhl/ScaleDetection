@@ -52,10 +52,10 @@ class TextParser:
 
     # Regex patterns for different unit formats
     UNIT_PATTERNS = {
-        "um": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(μm|um|µm|micrometer|micrometre)(?:\b|\d)).*$",
-        "nm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(nm|nanometer|nanometre)(?:\b|\d)).*$",
-        "mm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(mm|millimeter|millimetre|m)(?:\b|\d)).*$",
-        "cm": r"(?i)^(?=.*\d)(?=.*(?:\b|\d)(cm|centimeter|centimetre)(?:\b|\d)).*$",
+        "um": r"(?i)^(?=.*\d)(?=.*(μm|um|µm|micrometer|micrometre)).*$",
+        "nm": r"(?i)^(?=.*\d)(?=.*(nm|nanometer|nanometre)).*$",
+        "mm": r"(?i)^(?=.*\d)(?=.*(mm|millimeter|millimetre|(?:\b|\d)m)).*$",
+        "cm": r"(?i)^(?=.*\d)(?=.*(cm|centimeter|centimetre)).*$",
     }
 
     @classmethod
@@ -125,7 +125,7 @@ class TextParser:
 class OCRProcessor:
     """OCR processor with multiple backend support."""
 
-    def __init__(self, confidence_threshold: float = 0.25):
+    def __init__(self, confidence_threshold: float = 0.05):
         """
         Initialize OCR processor.
 
@@ -157,9 +157,11 @@ class OCRProcessor:
             x_min, y_min, x_max, y_max = bbox
 
             # Extract ROI with some padding
+            x_pad = (x_max - x_min)
+            y_pad = 2 * (y_max - y_min)
             roi = image[
-                int(max(y_min - 20, 0)) : int(min(y_max + 20, image.shape[0])),
-                int(max(x_min - 20, 0)) : int(min(x_max + 20, image.shape[1])),
+                int(max(y_min - y_pad, 0)) : int(min(y_max + y_pad, image.shape[0])),
+                int(max(x_min - x_pad, 0)) : int(min(x_max + x_pad, image.shape[1])),
             ]
             if roi.size == 0:
                 return LabelDetection(text="", confidence=0.0, bbox=None)
@@ -212,20 +214,22 @@ class OCRProcessor:
             preprocessed (np.ndarray): Grayscale, contrast-enhanced and denoised image.
         """
         # Convert to grayscale if needed
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        #gray = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        img = image.copy()
 
         # Resize if too small (minimum height of 32 pixels)
-        if gray.shape[0] < 32:
-            scale_factor = 32 / gray.shape[0]
-            new_width = int(gray.shape[1] * scale_factor)
-            gray = cv2.resize(gray, (new_width, 32), interpolation=cv2.INTER_CUBIC)
+        if img.shape[0] < 32:
+            scale_factor = 32 / img.shape[0]
+            new_width = int(img.shape[1] * scale_factor)
+            img = cv2.resize(img, (new_width, 32), interpolation=cv2.INTER_CUBIC)
 
         # Enhance contrast
-        p2, p98 = np.percentile(gray, (2, 98))
-        gray = np.clip((gray - p2) * (255.0 / (p98 - p2)), 0, 255).astype(np.uint8)
-
-        return gray
-
+        p1, p99 = np.percentile(img, (1, 99))
+        img = np.clip((img - p1) * (255.0 / (p99 - p1)), 0, 255).astype(np.uint8)
+        
+        # Denoise with Gaussian blur
+        #img = cv2.bilateralFilter(img, d=5, sigmaColor=75, sigmaSpace=75)
+        return img
 
 def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
     """

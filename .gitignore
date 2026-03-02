@@ -213,6 +213,7 @@ data_small/
 atypical_examples/
 error_analysis*/
 classification examples/
+.precomputed_ORB_descriptors/*
 
 # Models
 *.pt
@@ -224,4 +225,6 @@ embeddings*/
 .DS_Store
 
 # Outputs
-outputs*/
+**/outputs*/
+**nosync**
+**nosync**/*

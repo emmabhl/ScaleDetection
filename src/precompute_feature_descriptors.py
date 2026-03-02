@@ -16,29 +16,28 @@ import logging as log
 import os
 import pickle
 import shutil
-from typing import Any, Dict, Generator, List, Optional, Tuple, cast
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import cv2
 import numpy as np
 from huggingface_hub import snapshot_download
 
 
-def compute_orb(
-    orb: cv2.ORB, img_gray: np.ndarray
+def compute_features(
+    detector: Union[cv2.ORB, cv2.AKAZE, cv2.SIFT], img_gray: np.ndarray
 ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[np.ndarray]]:
     """Compute ORB keypoints and descriptors and serialize keypoints.
 
     Args:
-        orb (cv2.ORB): ORB detector instance.
+        sift (cv2.SIFT): SIFT detector instance.
         img_gray (np.ndarray): Grayscale image to process.
 
     Returns:
         (kp_dicts, descriptors): Serialized keypoint dicts and descriptor array,
             or (None, None) if no keypoints found.
     """
-    keypoints, descriptors = orb.detectAndCompute(
-        img_gray, cast(cv2.typing.MatLike, None)
-    )
+    keypoints, descriptors = detector.detectAndCompute(img_gray, cast(cv2.typing.MatLike, None))
+    
     if descriptors is None or len(keypoints) == 0:
         return None, None
 
@@ -58,11 +57,11 @@ def compute_orb(
     return kp_dicts, descriptors
 
 
-def process_template_file(orb: cv2.ORB, file_path: str) -> Optional[Dict[str, Any]]:
+def process_template_file(detectors: Tuple[cv2.ORB, cv2.AKAZE, cv2.SIFT], file_path: str) -> Optional[Dict[str, Any]]:
     """Load an image file and compute ORB keypoints/descriptors.
 
     Args:
-        orb (cv2.ORB): ORB detector instance.
+        detector (Union[cv2.ORB, cv2.AKAZE, cv2.SIFT]): Feature detector instance.
         file_path (str): Path to the image file.
 
     Returns:
@@ -73,16 +72,26 @@ def process_template_file(orb: cv2.ORB, file_path: str) -> Optional[Dict[str, An
         log.error(f"Could not load file: {file_path}")
         return None
 
-    keypoints, descriptors = compute_orb(orb, img)
-    if keypoints is None:
+    keypoints = {}
+    descriptors = {}
+    for method, detector in zip(["ORB", "AKAZE", "SIFT"], detectors):
+        keypoints[method], descriptors[method] = compute_features(detector, img)
+    if all(kp is None for kp in keypoints.values()):
         log.error(f"No keypoints in {os.path.basename(file_path)}")
         return None
 
     return {
         "filename": os.path.basename(file_path),
         "image_shape": img.shape,
-        "keypoints": keypoints,
-        "descriptors": descriptors,
+        
+        "keypoints_orb": keypoints.get("ORB"),
+        "descriptors_orb": descriptors.get("ORB"),
+        
+        "keypoints_akaze": keypoints.get("AKAZE"),
+        "descriptors_akaze": descriptors.get("AKAZE"),
+        
+        "keypoints_sift": keypoints.get("SIFT"),
+        "descriptors_sift": descriptors.get("SIFT"),
     }
 
 
@@ -128,7 +137,7 @@ def save_templates(output_path: str, templates: List[Dict[str, Any]]) -> None:
 def main(
     template_root: str = "emmabhl/atypical-scalebar",
     output_root: str = ".precomputed_ORB_descriptors",
-    nfeatures: int = 1000,
+    nfeatures: int = 5000,
 ) -> None:
     """Compute ORB descriptors for all templates and save per-type pickles.
 
@@ -143,10 +152,11 @@ def main(
     os.makedirs(output_root, exist_ok=True)
 
     # Create ORB exactly once
-    orb = cv2.ORB_create(
-        nfeatures=nfeatures
-    )  # pyright: ignore[reportAttributeAccessIssue]
-
+    orb = cv2.ORB_create(nfeatures=nfeatures)   # pyright: ignore[reportAttributeAccessIssue]
+    akaze = cv2.AKAZE_create()                  # pyright: ignore[reportAttributeAccessIssue]
+    sift = cv2.SIFT_create(nfeatures=nfeatures) # pyright: ignore[reportAttributeAccessIssue]
+    detectors = (orb, akaze, sift)
+    
     # Group files by type
     type_to_files = {}
     for ttype, file_path in iterate_template_files(template_root):
@@ -156,7 +166,7 @@ def main(
     for ttype, files in type_to_files.items():
         results = []
         for file_path in files:
-            info = process_template_file(orb, file_path)
+            info = process_template_file(detectors, file_path)
             if info is not None:
                 results.append(info)
 

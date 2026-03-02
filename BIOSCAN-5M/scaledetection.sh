@@ -17,4 +17,4 @@ source ~/.bashrc
 source ~/scale/bin/activate
 
 # Run the VLM scale detection script
-python ../src/scaledetection.py --model models/yolov8m_train/weights/best.pt --image_dir BIOSCAN-5M/data/nonKeyence_images/ --output_dir results/BIOSCAN_5M_nonKeyence1/
+python ../src/scaledetection.py --model models/yolov8m_train/weights/best.pt --image_dir BIOSCAN-5M/data/nonKeyence_images/ --output_dir BIOSCAN-5M/results/nonKeyence1/

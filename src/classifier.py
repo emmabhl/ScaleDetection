@@ -18,13 +18,13 @@ There is no CLI entry point; the class is used by the main pipeline
 import logging as log
 import os
 import pickle
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from precompute_ORB_descriptors import main as precompute_ORB_descriptors
+from precompute_feature_descriptors import main as precompute_features_descriptors
 
 
 class ScaleBarClassifier:
@@ -44,23 +44,26 @@ class ScaleBarClassifier:
 
     def __init__(
         self,
-        score_threshold: float = 0.15,
-        nfeatures: int = 1000,
+        score_threshold: float = 0.02,
+        nfeatures: int = 5000,
         ratio_thresh: float = 0.75,
-        min_match_count: int = 10,
+        min_match_count: int = 6,
         atypical_data_path: Optional[str] = None,
     ):
-        self.precomputed_dir = ".precomputed_ORB_descriptors"
+        self.precomputed_dir = ".precomputed_feature_descriptors"
         self.score_threshold = score_threshold
         self.nfeatures = nfeatures
         self.ratio_thresh = ratio_thresh
         self.min_match_count = min_match_count
 
-        # ORB + BFMatcher (knn + ratio test)
-        self.orb = cv2.ORB_create(  # pyright: ignore[reportAttributeAccessIssue]
-            nfeatures=self.nfeatures
-        )
-        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        # ORB + AKAZE + SIFT detectors
+        self.orb = cv2.ORB_create(nfeatures=self.nfeatures) # pyright: ignore[reportAttributeAccessIssue]
+        self.akaze = cv2.AKAZE_create() # pyright: ignore[reportAttributeAccessIssue]
+        self.sift = cv2.SIFT_create(nfeatures=self.nfeatures) # pyright: ignore[reportAttributeAccessIssue]
+        
+        # Matchers for different descriptor types
+        self.bf_hamming = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)  # ORB + AKAZE
+        self.bf_l2 = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)            # SIFT
 
         # Loaded templates (dict: scale_type -> list of template_info dicts)
         self.templates_per_type: Dict[str, List[Dict[str, Any]]] = {}
@@ -68,11 +71,13 @@ class ScaleBarClassifier:
             self.load_templates()
         else:
             if atypical_data_path is None:
+                # FIXME: Load from emmabhl/atypical-scalebar dataset if no local path provided
+                
                 raise ValueError(
                     "precomputed_dir does not exist and no atypical_data_path path provided."
                 )
 
-            precompute_ORB_descriptors(
+            precompute_features_descriptors(
                 atypical_data_path, self.precomputed_dir, nfeatures=self.nfeatures
             )
             self.load_templates()
@@ -106,6 +111,9 @@ class ScaleBarClassifier:
         Returns:
             keypoints (List[cv2.KeyPoint]): Reconstructed KeyPoint objects.
         """
+        if not kp_dicts:
+            return []
+
         kps = [
             cv2.KeyPoint(
                 float(kp["pt"][0]),
@@ -119,6 +127,63 @@ class ScaleBarClassifier:
             for kp in kp_dicts
         ]
         return kps
+    
+    
+    def _match_with_method(
+        self, 
+        method_name: str, 
+        kp1: List[cv2.KeyPoint], 
+        des1: np.ndarray, 
+        kp2: List[cv2.KeyPoint], 
+        des2: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], int, Optional[List[cv2.DMatch]]]:
+        """Match descriptors using specified method and compute homography.
+        
+        Args:
+            method_name (str): One of 'orb', 'akaze', 'sift'.
+            kp1 (List[cv2.KeyPoint]): Keypoints from template image.
+            des1 (np.ndarray): Descriptors from template image.
+            kp2 (List[cv2.KeyPoint]): Keypoints from target image.
+            des2 (np.ndarray): Descriptors from target image.
+            
+        Returns:
+            M (Optional[np.ndarray]): Homography matrix if found, else None.
+            inlier_count (int): Number of inliers from homography.
+            good_matches (Optional[List[cv2.DMatch]]): List of good matches, or None.
+        """
+        if des1 is None or des2 is None:
+            return None, 0, None
+
+        if method_name in ("orb", "akaze"):
+            matcher = self.bf_hamming
+        else:
+            matcher = self.bf_l2
+
+        # knn match
+        matches = matcher.knnMatch(des1, des2, k=2)
+
+        # ratio test
+        good_matches = []
+        for m_n in matches:
+            if len(m_n) < 2:
+                continue
+            m, n = m_n
+            if m.distance < self.ratio_thresh * n.distance:
+                good_matches.append(m)
+
+        if len(good_matches) < self.min_match_count:
+            return None, len(good_matches), None
+
+        # homography
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 4.0)
+        if M is None or mask is None:
+            return None, len(good_matches), None
+
+        return M, int(np.sum(mask)), good_matches
+
 
     def classify_scale_bar(
         self, target_image: np.ndarray
@@ -138,10 +203,36 @@ class ScaleBarClassifier:
         else:
             target_gray = target_image.copy()
 
-        kp2, des2 = self.orb.detectAndCompute(target_gray, None)
-        if des2 is None or len(kp2) == 0:
+        kp_orb, des_orb     = self.orb.detectAndCompute(target_gray, None)
+        kp_akaze, des_akaze = self.akaze.detectAndCompute(target_gray, None)
+        kp_sift, des_sift   = self.sift.detectAndCompute(target_gray, None)
+        
+        # Plot keypoints in red for ORB, green for AKAZE, blue for SIFT for debugging
+        img_kp = target_gray.copy()
+        if len(img_kp.shape) == 2:
+            img_kp = cv2.cvtColor(img_kp, cv2.COLOR_GRAY2BGR)
+
+        img_kp = cv2.drawKeypoints(img_kp, kp_orb, img_kp, color=(0, 0, 255), flags=0)
+        img_kp = cv2.drawKeypoints(img_kp, kp_akaze, img_kp, color=(0, 255, 0), flags=0)
+        img_kp = cv2.drawKeypoints(img_kp, kp_sift, img_kp, color=(255, 0, 0), flags=0)
+
+        plt.figure(figsize=(10, 8))
+        plt.imshow(cv2.cvtColor(img_kp, cv2.COLOR_BGR2RGB))
+        plt.title("Keypoints: ORB (Red), AKAZE (Green), SIFT (Blue)")
+        plt.axis("off")
+        plt.show()
+        
+        if (
+            all(des is None for des in [des_orb, des_akaze, des_sift]) or 
+            all(len(kp) == 0 for kp in [kp_orb, kp_akaze, kp_sift])
+        ):
             return None
 
+        methods = [
+            ("orb",   "keypoints_orb",   "descriptors_orb",   kp_orb,   des_orb),
+            ("akaze", "keypoints_akaze", "descriptors_akaze", kp_akaze, des_akaze),
+            ("sift",  "keypoints_sift",  "descriptors_sift",  kp_sift,  des_sift),
+        ]
         results: List[Dict[str, Any]] = []
 
         for scale_type, templates in self.templates_per_type.items():
@@ -150,80 +241,23 @@ class ScaleBarClassifier:
             best_template_fname = None
 
             for template_info in templates:
-                des1 = template_info["descriptors"]
-                kp1_dicts = template_info["keypoints"]
-                kp1 = self.reconstruct_keypoints(kp1_dicts)
+                for method, kp_key, des_key, kp2, des2 in methods:
+                    # Load template features
+                    kp1 = self.reconstruct_keypoints(template_info[kp_key])
+                    des1 = template_info[des_key]
 
-                # Match descriptors using KNN
-                matches = self.bf.knnMatch(des1, des2, k=2)
+                    M, inliers, gm = self._match_with_method(method, kp1, des1, kp2, des2)
 
-                # Apply Lowe's ratio test
-                good_matches = []
-                ratio_thresh = self.ratio_thresh
-                for pair in matches:
-                    # original script assumes pairs (m, n)
-                    if len(pair) < 2:
-                        continue
-                    m, n = pair[0], pair[1]
-                    if m.distance < ratio_thresh * n.distance:
-                        good_matches.append(m)
-
-                if len(good_matches) >= self.min_match_count:
-                    # Prepare points for homography
-                    src_pts = (
-                        np.array([kp1[m.queryIdx].pt for m in good_matches])
-                        .astype(np.float32)
-                        .reshape(-1, 1, 2)
-                    )
-                    dst_pts = (
-                        np.array([kp2[m.trainIdx].pt for m in good_matches])
-                        .astype(np.float32)
-                        .reshape(-1, 1, 2)
-                    )
-
-                    M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 4.0)
-                    if M is not None and mask is not None:
-                        mask = mask.ravel()
-                        inliers = int(np.sum(mask))
-
-                        # Compute a normalized score (as in original script)
-                        score = inliers / len(kp1) if len(kp1) > 0 else 0.0
-
+                    if M is not None:
+                        score = inliers / len(kp1) if len(kp1) else 0
                         if score > best_score:
                             best_score = score
+                            best_template_fname = template_info["filename"]
                             h, w = template_info["image_shape"]
-                            pts = (
-                                np.array([[0, 0], [w, 0], [w, h], [0, h]])
-                                .astype(np.float32)
-                                .reshape(-1, 1, 2)
-                            )
+                            pts = np.float32([[0,0], [w,0], [w,h], [0,h]]).reshape(-1,1,2)
                             dst = cv2.perspectiveTransform(pts, M)
                             best_bbox = dst
                             best_template_fname = template_info["filename"]
-                # Fallback if not enough matches or homography fails (as in original script)
-                elif len(good_matches) >= 5:
-                    dst_pts = np.array(
-                        [kp2[m.trainIdx].pt for m in good_matches]
-                    ).astype(np.float32)
-                    x_min, y_min = float(dst_pts[:, 0].min()), float(
-                        dst_pts[:, 1].min()
-                    )
-                    x_max, y_max = float(dst_pts[:, 0].max()), float(
-                        dst_pts[:, 1].max()
-                    )
-                    score = len(good_matches) / len(kp1) if len(kp1) > 0 else 0.0
-                    if score > best_score:
-                        best_score = score
-                        best_bbox = np.array(
-                            [
-                                [x_min, y_min],
-                                [x_max, y_min],
-                                [x_max, y_max],
-                                [x_min, y_max],
-                            ],
-                            dtype=np.float32,
-                        ).reshape(-1, 1, 2)
-                        best_template_fname = template_info["filename"]
 
             if best_score > self.score_threshold:
                 best_bbox = (

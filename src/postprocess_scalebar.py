@@ -508,7 +508,7 @@ class ScalebarProcessor:
                 rel_start[0], rel_start[1], "go", markersize=3, label="Start"
             )
             axes[1, 2].plot(rel_end[0], rel_end[1], "ro", markersize=3, label="End")
-            axes[1, 2].legend()
+            axes[1, 2].legend(loc="upper right")
         axes[1, 2].set_title(f'Result (Length: {results["pixel_length"]:.1f}px)')
 
         plt.tight_layout()

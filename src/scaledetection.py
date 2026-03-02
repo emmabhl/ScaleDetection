@@ -38,7 +38,9 @@ from atypical_scalebars import (
 from classifier import ScaleBarClassifier
 from ocr import OCRProcessor, LabelDetection
 from postprocess_scalebar import ScalebarDetection, ScalebarProcessor
-from utils import ensure_model_available
+from utils import ensure_model_available, handler
+import signal
+
 
 
 @dataclass
@@ -116,12 +118,12 @@ class ScaleDetectionPipeline:
 
         # ---------- SCALEBAR DETECTION & MEASUREMENT ----------
         scalebar_detection = self.scalebar_processor.localize_scalebar_endpoints(
-            image, bar_box, plot_path=plot_path
+            image, bar_box, plot_path=plot_path if self.debug_dir else None
         )
 
         # --------- TEXT LABEL DETECTION & RECOGNITION ---------
         label_detection = self.ocr_processor.extract_text_labels(
-            image, label_box, plot_path=plot_path
+            image, label_box, plot_path=plot_path if self.debug_dir else None
         )
 
         # ----------- MATCHING & RESULTS PREPARATION -----------
@@ -150,13 +152,13 @@ class ScaleDetectionPipeline:
         if detection_results["scale_type"] == "graduation_middleunit":
             # ---------- SCALEBAR DETECTION & MEASUREMENT ----------
             scalebar_detection = extract_white_horizontal_shape(
-                image, bbox, plot_path=plot_path
+                image, bbox, plot_path=plot_path if self.debug_dir else None
             )
 
             # --------- TEXT LABEL DETECTION & RECOGNITION ---------
             bbox_xyxy = np.array([bbox[0][0], bbox[0][1], bbox[2][0], bbox[2][1]])
             label_detection = self.ocr_processor.extract_text_labels(
-                image, bbox_xyxy, plot_path=plot_path
+                image, bbox_xyxy, plot_path=plot_path if self.debug_dir else None
             )
 
             # ----------- MATCHING & RESULTS PREPARATION -----------
@@ -166,7 +168,7 @@ class ScaleDetectionPipeline:
 
         elif detection_results["scale_type"] == "ruler_photo":
             avg_distance = extract_black_vertical_lines(
-                image, bbox, plot_path=plot_path
+                image, bbox, plot_path=plot_path if self.debug_dir else None
             )
 
             if avg_distance == 0.0:
@@ -313,7 +315,7 @@ class ScaleDetectionPipeline:
                 measured_scale_length=float(px_len) if px_len else None,
                 declared_scale_length=float(value) if value else None,
                 units=unit,
-                pixel_to_mm_ratio=2.95 * 10e-6,  # K
+                pixel_to_mm_ratio=0.0,
                 scale_bar_confidence=float(bar_score),
                 scale_length_flag=bool(scalebar_detection.flag),
                 text_label_confidence=float(label_score),
@@ -415,13 +417,13 @@ def main():
     parser.add_argument(
         "--classifier_score_threshold",
         type=float,
-        default=0.15,
+        default=0.1,
         help="Threshold for reporting scale bar classification results",
     )
     parser.add_argument(
         "--nfeatures_ORB",
         type=int,
-        default=1000,
+        default=5000,
         help="Number of ORB features for scale bar classification",
     )
     parser.add_argument(
@@ -479,9 +481,17 @@ def main():
 
     # Process images sequentially
     for img_path in tqdm(image_paths, desc="Processing images"):
-        image = cv2.imread(img_path, cv2.IMREAD_COLOR_RGB)
-        if image is None:
-            log.warning(f"Could not read image {img_path}, skipping.")
+
+        signal.signal(signal.SIGALRM, handler)
+        signal.alarm(15)  # 15 seconds timeout
+        try:
+            image = cv2.imread(img_path, cv2.IMREAD_COLOR_RGB)
+            signal.alarm(0)  # Disable the alarm
+            if image is None:
+                log.warning(f"Could not read image {img_path}, skipping.")
+                continue
+        except TimeoutError:
+            log.warning(f"Loading image {img_path} timed out, skipping.")
             continue
 
         image_name = os.path.splitext(os.path.basename(img_path))[0]
@@ -500,8 +510,23 @@ def main():
                 os.path.join(args.output_dir, f"{image_name}_classification.png"),
             )
 
-        # 2) If no atypical matches -> run YOLO standard detection + pipeline
-        if not matches:
+        # 2) If atypical matches -> run specialized pipeline for atypical scale bars
+        if matches:
+            log.info(
+                "Atypical scale bar detected, proceeding with specialized processing"
+            )
+
+            # Process the best detected atypical scale bar
+            try:
+                results = pipeline.process_atypical_detections(
+                    image, matches[0], plot_base
+                )
+            except Exception as e:
+                log.error(f"Error processing atypical detection for {img_path}: {e}")
+                continue
+
+        # 3) If no atypical matches -> run YOLO standard detection + pipeline
+        if not matches or results.scale_bar_found is False:
             log.info("No atypical scale bar detected, proceeding with normal detection")
             try:
                 yolo_results = model.predict(
@@ -528,21 +553,7 @@ def main():
                 )
             except Exception as e:
                 log.error(f"Error processing YOLO detections for {img_path}: {e}")
-                continue
-
-        else:
-            log.info(
-                "Atypical scale bar detected, proceeding with specialized processing"
-            )
-
-            # Process the best detected atypical scale bar
-            try:
-                results = pipeline.process_atypical_detections(
-                    image, matches[0], plot_base
-                )
-            except Exception as e:
-                log.error(f"Error processing atypical detection for {img_path}: {e}")
-                continue
+                continue            
 
         # Save the results JSON
         pipeline.save_results(
