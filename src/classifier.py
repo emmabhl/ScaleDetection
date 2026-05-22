@@ -50,7 +50,7 @@ class ScaleBarClassifier:
         min_match_count: int = 6,
         atypical_data_path: Optional[str] = None,
     ):
-        self.precomputed_dir = ".precomputed_feature_descriptors"
+        self.precomputed_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".precomputed_feature_descriptors")
         self.score_threshold = score_threshold
         self.nfeatures = nfeatures
         self.ratio_thresh = ratio_thresh
@@ -206,21 +206,6 @@ class ScaleBarClassifier:
         kp_orb, des_orb     = self.orb.detectAndCompute(target_gray, None)
         kp_akaze, des_akaze = self.akaze.detectAndCompute(target_gray, None)
         kp_sift, des_sift   = self.sift.detectAndCompute(target_gray, None)
-        
-        # Plot keypoints in red for ORB, green for AKAZE, blue for SIFT for debugging
-        img_kp = target_gray.copy()
-        if len(img_kp.shape) == 2:
-            img_kp = cv2.cvtColor(img_kp, cv2.COLOR_GRAY2BGR)
-
-        img_kp = cv2.drawKeypoints(img_kp, kp_orb, img_kp, color=(0, 0, 255), flags=0)
-        img_kp = cv2.drawKeypoints(img_kp, kp_akaze, img_kp, color=(0, 255, 0), flags=0)
-        img_kp = cv2.drawKeypoints(img_kp, kp_sift, img_kp, color=(255, 0, 0), flags=0)
-
-        plt.figure(figsize=(10, 8))
-        plt.imshow(cv2.cvtColor(img_kp, cv2.COLOR_BGR2RGB))
-        plt.title("Keypoints: ORB (Red), AKAZE (Green), SIFT (Blue)")
-        plt.axis("off")
-        plt.show()
         
         if (
             all(des is None for des in [des_orb, des_akaze, des_sift]) or 
