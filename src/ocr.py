@@ -125,7 +125,7 @@ class TextParser:
 class OCRProcessor:
     """OCR processor with multiple backend support."""
 
-    def __init__(self, confidence_threshold: float = 0.05):
+    def __init__(self, confidence_threshold: float = 0.01):
         """
         Initialize OCR processor.
 
@@ -156,9 +156,12 @@ class OCRProcessor:
             # Apply OCR to text label regions only
             x_min, y_min, x_max, y_max = bbox
 
-            # Extract ROI with some padding
-            x_pad = (x_max - x_min)
-            y_pad = 2 * (y_max - y_min)
+            # Extract ROI with modest padding — enough context for PaddleOCR's text
+            # detector without pulling in the adjacent scale bar line, which sits
+            # immediately to the left of / above the label and was causing the bar's
+            # black stroke to appear in the OCR region and lower unit-token confidence.
+            x_pad = (x_max - x_min) // 2
+            y_pad = (y_max - y_min) // 2
             roi = image[
                 int(max(y_min - y_pad, 0)) : int(min(y_max + y_pad, image.shape[0])),
                 int(max(x_min - x_pad, 0)) : int(min(x_max + x_pad, image.shape[1])),
