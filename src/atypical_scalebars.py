@@ -280,10 +280,12 @@ def extract_black_vertical_lines(
             peaks, properties = signal.find_peaks(
                 vertical_projection, distance=estimated_distance * 0.5
             )
-            peak_diffs = np.diff(peaks)
-            avg_distance = float(
-                np.mean(peak_diffs[peak_diffs < estimated_distance * 1.5])
-            )
+            if len(peaks) < 2:
+                avg_distance = 0.0
+            else:
+                peak_diffs = np.diff(peaks)
+                filtered_diffs = peak_diffs[peak_diffs < estimated_distance * 1.5]
+                avg_distance = float(np.mean(filtered_diffs)) if len(filtered_diffs) > 0 else 0.0
 
         if plot_path is not None:
             vis_res = {
