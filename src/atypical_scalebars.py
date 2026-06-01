@@ -18,6 +18,7 @@ These utilities are intended to be imported and called by the main pipeline
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 import logging as logger
+import warnings
 
 import cv2
 import matplotlib.pyplot as plt
@@ -48,13 +49,13 @@ def extract_white_horizontal_shape(
     """
     try:
         flag = False
-        # 1) Crop and convert to grayscale
+        # 1) Crop to bbox and convert to grayscale
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
         bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
         image = image[bbox_xyxy[1]:image.shape[0], bbox_xyxy[0]:image.shape[1]]
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
-        # 2) Edge detection to detect black rectangle outline
+        # 2) Edge detection (kept for visualization)
         edges = cv2.Canny(gray, 50, 150)
 
         # 3) Locate the black rectangle by thresholding dark pixels and finding its
@@ -151,7 +152,10 @@ def extract_white_horizontal_shape(
         return ScalebarDetection(
             bbox=np.array(bbox_xyxy) if candidates else np.zeros((4,)),
             pixel_length=length,
-            endpoints=[(start[1] + bbox_xyxy[0], start[0] + bbox_xyxy[1]), (end[1] + bbox_xyxy[0], end[0] + bbox_xyxy[1])],
+            endpoints=[
+                (start[1] + crop_offset_x + bbox_xyxy[0], start[0] + crop_offset_y + bbox_xyxy[1]),
+                (end[1] + crop_offset_x + bbox_xyxy[0], end[0] + crop_offset_y + bbox_xyxy[1]),
+            ],
             flag=flag,
         )
 
