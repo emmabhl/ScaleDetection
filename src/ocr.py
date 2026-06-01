@@ -203,11 +203,10 @@ class OCRProcessor:
             ):
                 return LabelDetection(text=text, confidence=0.0, bbox=bbox)
 
+            passing_scores = [s for s in output["rec_scores"] if s >= self.conf_thr]
             return LabelDetection(
                 text=text,
-                confidence=np.min(
-                    [s for s in output["rec_scores"] if s >= self.conf_thr]
-                ),
+                confidence=float(np.min(passing_scores)) if passing_scores else 0.0,
                 bbox=bbox,
                 parsed_value=value,
                 normalized_unit=unit,
