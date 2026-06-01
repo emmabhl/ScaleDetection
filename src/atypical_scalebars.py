@@ -57,44 +57,22 @@ def extract_white_horizontal_shape(
         # 2) Edge detection to detect black rectangle outline
         edges = cv2.Canny(gray, 50, 150)
 
-        # 3) Find largest 4-sided contour to crop tightly around the shape
-        contours, _ = cv2.findContours(
-            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        rect_contour = None
-        max_area = 0
-        for cnt in contours:
-            # close contour if small gaps
-            cnt = cv2.convexHull(cnt)
-            
-            # approximate polygon
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.04 * peri, False)
-
-            # keep 4-sided shapes
-            if len(approx) == 4:
-                area = cv2.contourArea(approx)
-                if area > max_area:  # keep largest
-                    max_area = area
-                    rect_contour = approx
-
-        if rect_contour is None:
-            # Fallback: use bounding box of largest contour (but make sure the rectangle is not too small nor too large)
-            largest_cnt = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest_cnt)
-            if w > 0.5 * (bbox_xyxy[2] - bbox_xyxy[0]) and h > 0.5 * (bbox_xyxy[3] - bbox_xyxy[1]):
-                crop = gray[
-                    y:, x:
-                ]  # Crop from the top-left corner of the box to the image corner
-            else:
-                logger.warning(
-                    "No rectangular contour found, proceeding with original bbox."
-                )
-                flag = True
-                crop = gray
-        else:
-            x, y, w, h = cv2.boundingRect(np.asarray(rect_contour))
-            crop = gray[y : y + h, x : x + w]
+        # 3) Locate the black rectangle by thresholding dark pixels and finding its
+        #    bounding box. This is more robust than contour-based re-cropping, which
+        #    is sensitive to noise, partial occlusion, and bbox rotation.
+        _, dark_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        dark_coords = cv2.findNonZero(dark_mask)
+        crop = gray  # fallback: use full bbox crop
+        crop_offset_x, crop_offset_y = 0, 0
+        if dark_coords is not None:
+            rx, ry, rw, rh = cv2.boundingRect(dark_coords)
+            bbox_w = bbox_xyxy[2] - bbox_xyxy[0]
+            bbox_h = bbox_xyxy[3] - bbox_xyxy[1]
+            # Only accept if the detected dark region is large enough to be the rectangle
+            # and has a landscape aspect ratio (wider than tall)
+            if rw >= 0.4 * bbox_w and rh >= 0.3 * bbox_h and rw >= rh:
+                crop = gray[ry : ry + rh, rx : rx + rw]
+                crop_offset_x, crop_offset_y = rx, ry
 
         # 4) Threshold based on high quantile after Gaussian blur (bar is white)
         blur = cv2.GaussianBlur(crop, (5, 5), 0)
