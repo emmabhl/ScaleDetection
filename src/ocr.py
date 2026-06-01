@@ -163,15 +163,17 @@ class OCRProcessor:
             # Apply OCR to text label regions only
             x_min, y_min, x_max, y_max = bbox
 
-            # Extract ROI with modest padding — enough context for PaddleOCR's text
-            # detector without pulling in the adjacent scale bar line, which sits
-            # immediately to the left of / above the label and was causing the bar's
-            # black stroke to appear in the OCR region and lower unit-token confidence.
-            x_pad = (x_max - x_min) // 2
+            # Pad generously on the left so a leading digit ("2 mm", "1 mm") that
+            # sits outside the detected label bbox is still included in the OCR crop.
+            # Right and vertical padding remain modest to avoid pulling in the scale
+            # bar stroke, which previously lowered unit-token confidence.
+            label_w = x_max - x_min
+            x_pad_left = label_w
+            x_pad_right = label_w // 2
             y_pad = (y_max - y_min) // 2
             roi = image[
                 int(max(y_min - y_pad, 0)) : int(min(y_max + y_pad, image.shape[0])),
-                int(max(x_min - x_pad, 0)) : int(min(x_max + x_pad, image.shape[1])),
+                int(max(x_min - x_pad_left, 0)) : int(min(x_max + x_pad_right, image.shape[1])),
             ]
             if roi.size == 0:
                 return LabelDetection(text="", confidence=0.0, bbox=None)
