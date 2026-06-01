@@ -52,7 +52,10 @@ def extract_white_horizontal_shape(
         # 1) Crop to bbox and convert to grayscale
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
         bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
-        image = image[bbox_xyxy[1]:image.shape[0], bbox_xyxy[0]:image.shape[1]]
+        image = image[bbox_xyxy[1]:bbox_xyxy[3], bbox_xyxy[0]:bbox_xyxy[2]]
+        if image.size == 0:
+            logger.warning("Empty crop for scalebar extraction — bbox likely out of image bounds.")
+            return ScalebarDetection(bbox=np.zeros((4,)), pixel_length=0.0, endpoints=None, flag=True)
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
         # 2) Edge detection (kept for visualization)
@@ -207,7 +210,10 @@ def extract_black_vertical_lines(
         # 1) Convert to grayscale, increase contrast, invert colors and pad
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
         bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
-        roi = image[bbox_xyxy[1]:image.shape[0], bbox_xyxy[0]:image.shape[1]]
+        roi = image[bbox_xyxy[1]:bbox_xyxy[3], bbox_xyxy[0]:bbox_xyxy[2]]
+        if roi.size == 0:
+            logger.warning("Empty ROI for ruler extraction — bbox likely out of image bounds.")
+            return 0.0
         roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
         p2, p98 = np.percentile(roi, (2, 98))
         roi = cv2.normalize(
