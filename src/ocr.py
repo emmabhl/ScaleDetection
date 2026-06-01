@@ -187,10 +187,11 @@ class OCRProcessor:
                 visualize_output(output, plot_path + "_ocr.png")
 
             # Parse text to get value and unit
+            _DIGIT_MISREADS = {"l": "1", "I": "1", "i": "1", "|": "1", ")": "2", "?": "2"}
             text = [
-                text
-                for text, score in zip(output["rec_texts"], output["rec_scores"])
-                if score >= self.conf_thr and text not in {"0", "O"}
+                _DIGIT_MISREADS.get(t, t)
+                for t, score in zip(output["rec_texts"], output["rec_scores"])
+                if score >= self.conf_thr and t not in {"0", "O"}
             ]
             text = " ".join(text).strip()
             value, unit = TextParser.parse_text(text)
