@@ -238,40 +238,46 @@ def extract_black_vertical_lines(
         # 5) Find band containing graduations on horizontal projection + estimate number of peaks
         horizontal_projection = np.sum(skeleton / 255, axis=1)
         max_peak = np.argmax(horizontal_projection)
-        band_OI = signal.peak_widths(horizontal_projection, [max_peak], rel_height=0.33)
-        peaks_num = np.round(
-            band_OI[1][0] * 1.469
-        )  # empirical factor to estimate number of peaks
+        band_OI = None
+        first_peak = None
+        avg_distance = 0.0
 
-        # 6) Estimate distance between graduations on vertical projection
-        vertical_projection = np.sum(
-            skeleton[int(band_OI[2][0]) : int(band_OI[3][0]), :], axis=0
-        )
-        peaks_range = np.where(vertical_projection > 0)[0]
-        if len(peaks_range) == 0:
-            avg_distance = 0.0  # No peaks found
-
+        if horizontal_projection[max_peak] == 0:
+            pass  # flat signal, avg_distance stays 0
         else:
-            peaks_range = peaks_range[  # Remove outliers assuming uniform distribution
-                (peaks_range >= np.median(peaks_range) - 2 * np.std(peaks_range))
-                & (peaks_range <= np.median(peaks_range) + 2 * np.std(peaks_range))
-            ]
-            first_peak, last_peak = peaks_range[0], peaks_range[-1]
-            estimated_distance = (
-                (last_peak - first_peak) / (peaks_num - 1) if peaks_num > 1 else 0
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                band_OI = signal.peak_widths(horizontal_projection, [max_peak], rel_height=0.33)
+            peaks_num = np.round(
+                band_OI[1][0] * 1.469
+            )  # empirical factor to estimate number of peaks
 
-            # 7) Find peaks in vertical projection
-            vertical_projection = vertical_projection[first_peak : last_peak + 1]
-            peaks, properties = signal.find_peaks(
-                vertical_projection, distance=estimated_distance * 0.5
+            # 6) Estimate distance between graduations on vertical projection
+            vertical_projection = np.sum(
+                skeleton[int(band_OI[2][0]) : int(band_OI[3][0]), :], axis=0
             )
-            if len(peaks) < 2:
-                avg_distance = 0.0
+            peaks_range = np.where(vertical_projection > 0)[0]
+            if len(peaks_range) == 0:
+                pass  # No peaks found, avg_distance stays 0
             else:
-                peak_diffs = np.diff(peaks)
-                filtered_diffs = peak_diffs[peak_diffs < estimated_distance * 1.5]
-                avg_distance = float(np.mean(filtered_diffs)) if len(filtered_diffs) > 0 else 0.0
+                peaks_range = peaks_range[  # Remove outliers assuming uniform distribution
+                    (peaks_range >= np.median(peaks_range) - 2 * np.std(peaks_range))
+                    & (peaks_range <= np.median(peaks_range) + 2 * np.std(peaks_range))
+                ]
+                first_peak, last_peak = peaks_range[0], peaks_range[-1]
+                estimated_distance = (
+                    (last_peak - first_peak) / (peaks_num - 1) if peaks_num > 1 else 0
+                )
+
+                # 7) Find peaks in vertical projection
+                vertical_projection = vertical_projection[first_peak : last_peak + 1]
+                peaks, properties = signal.find_peaks(
+                    vertical_projection, distance=max(1, estimated_distance * 0.5)
+                )
+                if len(peaks) >= 2:
+                    peak_diffs = np.diff(peaks)
+                    filtered_diffs = peak_diffs[peak_diffs < estimated_distance * 1.5]
+                    avg_distance = float(np.mean(filtered_diffs)) if len(filtered_diffs) > 0 else 0.0
 
         if plot_path is not None:
             vis_res = {
