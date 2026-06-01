@@ -27,31 +27,9 @@ import numpy as np
 
 from paddleocr import PaddleOCR
 
-# ── PaddlePaddle 3.3.x / PP-OCRv5 compatibility ──────────────────────────────
-#
-# PP-OCRv5 models are stored in PIR ("Program IR") format.  PaddleX's
-# paddle_static runner calls config.enable_new_ir(True) + enable_new_executor()
-# on every CPU inference config.  The new executor + MKL-DNN combination
-# triggers two distinct crashes depending on OCR input shape:
-#
-#   • Small/medium ROIs → Python exception (caught, OCR returns empty):
-#       (Unimplemented) ConvertPirAttribute2RuntimeAttribute not support
-#       [pir::ArrayAttribute<pir::DoubleAttribute>]
-#       (at .../new_executor/instruction/onednn/onednn_instruction.cc:116)
-#
-#   • Large ROIs (from ≳4k-pixel source images) → fatal C-level abort:
-#       "Intel MKL function load error: cpu specific dynamic library is not
-#        loaded"  (process killed; cannot be caught in Python)
-#
-# Root causes:
-#   1. engine_config enable_new_ir=False + delete_pass for oneDNN passes
-#      eliminates the Python-level ConvertPir exception.
-#   2. The C-level MKL abort is purely shape-dependent: the oneDNN + new
-#      executor path selects different kernels based on feature-map dimensions
-#      derived from the input ROI size.  Capping the ROI at 480×96 px keeps
-#      all inputs below the threshold that selects the crashing kernel path.
-#      Scale-bar labels ("1 mm", "200 µm", …) are short ASCII text; 480 px
-#      wide and 96 px tall is more than enough for reliable recognition.
+# ROI size cap: capping the crop fed to OCR at 480×96 px keeps inputs small
+# enough for reliable recognition of short scale-bar labels ("1 mm", "200 µm").
+# This also avoids MKL kernel selection issues on large ROIs from high-res images.
 _OCR_MAX_WIDTH = 480
 _OCR_MAX_HEIGHT = 96
 
@@ -61,26 +39,7 @@ MODEL = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     use_textline_orientation=False,
-    engine_config={
-        # run_mode="mkldnn" keeps Paddle's own MKL-DNN initialised; disabling
-        # it causes Paddle to attempt loading a CPU-specific MKL dynamic library
-        # that is absent on these nodes → fatal C-level abort on the first
-        # predict() call after OpenCV/SIFT has touched MKL state.
-        "run_mode": "mkldnn",
-        # enable_new_ir=False disables the PIR executor which raises
-        # (Unimplemented) ConvertPirAttribute2RuntimeAttribute not support
-        # [pir::ArrayAttribute<pir::DoubleAttribute>] for small/medium inputs.
-        "enable_new_ir": False,
-        # Delete oneDNN graph passes that still route through the failing
-        # oneDNN instruction path even with PIR disabled.
-        "delete_pass": [
-            "onednn_graph_pass",
-            "mkldnn_placement_pass",
-            "cpu_quantize_placement_pass",
-            "mkldnn_inplace_pass",
-            "onednn_placement_pass",
-        ],
-    },
+    enable_mkldnn=True,
 )
 
 
