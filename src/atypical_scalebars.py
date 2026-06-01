@@ -81,8 +81,10 @@ def extract_white_horizontal_shape(
             blur, thresh=float(T), maxval=255.0, type=cv2.THRESH_BINARY
         )
 
-        # 5) Morphological operations to clean noise (keep long horizontal shapes & thicken them)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ((crop.shape[1] // 4) | 1, 1))
+        # 5) Morphological operations to clean noise (keep long horizontal shapes & thicken them).
+        #    Use crop.shape[1] // 8 for the open kernel so it's not so wide that it erases
+        #    the thin bar strip at the very bottom of a tightly-cropped rectangle.
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ((crop.shape[1] // 8) | 1, 1))
         cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 1))
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_DILATE, kernel)
@@ -93,7 +95,9 @@ def extract_white_horizontal_shape(
             cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        # 7) Filter contours based on width and aspect ratio
+        # 7) Filter contours based on width and aspect ratio.
+        #    Relax the bottom-position threshold from 0.9 to 0.75 since a tight
+        #    dark-region crop places the bar strip closer to the centre of the crop.
         candidates = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
@@ -101,7 +105,7 @@ def extract_white_horizontal_shape(
             if (
                 w >= crop.shape[1] * 0.67  # sufficiently long
                 and aspect_ratio >= 5.0  # long horizontal shape
-                and y > crop.shape[0] * 0.9  # near bottom of crop
+                and y > crop.shape[0] * 0.75  # near bottom of crop
             ):
                 candidates.append((x, y, w, h))
 
