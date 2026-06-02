@@ -16,9 +16,9 @@ These utilities are intended to be imported and called by the main pipeline
 (`scaledetection.py`) or unit tests. No CLI entry point is provided.
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
 import logging as logger
 import warnings
+from typing import Any, Dict, Optional, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -34,7 +34,7 @@ from postprocess_scalebar import ScalebarDetection
 def extract_white_horizontal_shape(
     image: np.ndarray,
     bbox: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]],
-    plot_path=None,
+    plot_path: Optional[str] = None,
 ) -> ScalebarDetection:
     """Detect a white horizontal graduated scalebar inside a polygonal bbox.
 
@@ -51,7 +51,12 @@ def extract_white_horizontal_shape(
         flag = False
         # 1) Crop to bbox and convert to grayscale
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
-        bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
+        bbox_xyxy = [
+            min(x1, x2, x3, x4),
+            min(y1, y2, y3, y4),
+            max(x1, x2, x3, x4),
+            max(y1, y2, y3, y4),
+        ]
         image = image[bbox_xyxy[1]:bbox_xyxy[3], bbox_xyxy[0]:bbox_xyxy[2]]
         if image.size == 0:
             logger.warning("Empty crop for scalebar extraction — bbox likely out of image bounds.")
@@ -163,7 +168,7 @@ def extract_white_horizontal_shape(
         )
 
     except Exception as e:
-        logger.error(f"Error in extracting white graduated scale bar: {e}")
+        logger.error("Error in extracting white graduated scale bar: %s", e)
 
         if plot_path is not None:
             vis_res = {
@@ -175,9 +180,7 @@ def extract_white_horizontal_shape(
                 "thresh": thresh if "thresh" in locals() else None,
                 "cleaned": cleaned if "cleaned" in locals() else None,
             }
-            visualize_endpoint_detection(
-                vis_res, debug_path=plot_path + "_scalebar.png"
-            )
+            visualize_endpoint_detection(vis_res, debug_path=plot_path + "_scalebar.png")
 
         return ScalebarDetection(
             bbox=np.array(bbox_xyxy) if bbox is not None else np.zeros((4,)),
@@ -187,7 +190,7 @@ def extract_white_horizontal_shape(
         )
 
 
-# --------------------------------- PICTURE OF A RULER IN THE IMAGE --------------------------------
+# -------------------- PICTURE OF A RULER IN THE IMAGE --------------------
 
 
 def extract_black_vertical_lines(
@@ -199,17 +202,22 @@ def extract_black_vertical_lines(
 
     Args:
         image (np.ndarray): Input image (H,W,C or H,W).
-        bbox (Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]):
-            Polygonal bounding box as four (x,y) corners.
-        plot_path (Optional[str], optional): Path prefix to save debug visualizations. Defaults to None.
+        bbox: Polygonal bounding box as four (x,y) corners.
+        plot_path (Optional[str]): Path prefix to save debug visualisations.
 
     Returns:
-        avg_distance (float): Average distance in pixels between graduations, 0.0 if none detected.
+        avg_distance (float): Average distance in pixels between graduations,
+            0.0 if none are detected.
     """
     try:
         # 1) Convert to grayscale, increase contrast, invert colors and pad
         ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = bbox
-        bbox_xyxy = [min(x1, x2, x3, x4), min(y1, y2, y3, y4), max(x1, x2, x3, x4), max(y1, y2, y3, y4)]
+        bbox_xyxy = [
+            min(x1, x2, x3, x4),
+            min(y1, y2, y3, y4),
+            max(x1, x2, x3, x4),
+            max(y1, y2, y3, y4),
+        ]
         roi = image[bbox_xyxy[1]:bbox_xyxy[3], bbox_xyxy[0]:bbox_xyxy[2]]
         if roi.size == 0:
             logger.warning("Empty ROI for ruler extraction — bbox likely out of image bounds.")
@@ -217,20 +225,20 @@ def extract_black_vertical_lines(
         roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
         p2, p98 = np.percentile(roi, (2, 98))
         roi = cv2.normalize(
-            roi, dst=np.zeros_like(roi), alpha=0, beta=255, norm_type=cv2.NORM_MINMAX
+            roi,
+            dst=np.zeros_like(roi),
+            alpha=0,
+            beta=255,
+            norm_type=cv2.NORM_MINMAX,
         )
         roi = np.clip((roi - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
         inv = cv2.bitwise_not(roi)
         inv = cv2.copyMakeBorder(inv, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
 
         # 2) Morphological operations to remove all but long vertical shapes
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_RECT, (1, (roi.shape[0] // 15) | 1)
-        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, (roi.shape[0] // 15) | 1))
         cleaned = cv2.morphologyEx(inv, cv2.MORPH_CLOSE, kernel)
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_RECT, (1, (roi.shape[0] // 15) | 1)
-        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, (roi.shape[0] // 15) | 1))
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
 
         # 3) Thresholding with gaussian blur
@@ -297,8 +305,9 @@ def extract_black_vertical_lines(
             visualize_ruler_detection(roi, vis_res, plot_path + "_ruler.png")
 
         return avg_distance if avg_distance is not None else 0.0
+
     except Exception as e:
-        logger.error(f"Error in extracting black vertical lines: {e}")
+        logger.error("Error in extracting black vertical lines: %s", e)
 
         if plot_path is not None:
             vis_res = {
@@ -314,11 +323,14 @@ def extract_black_vertical_lines(
         return 0.0
 
 
+# -------------------- DEBUG VISUALISATION HELPERS --------------------
+
+
 def visualize_endpoint_detection(
     results: Dict[str, Any],
     debug_path: str,
 ) -> None:
-    """Save a debug visualization showing intermediate endpoint detection steps.
+    """Save a debug visualisation showing intermediate endpoint-detection steps.
 
     Args:
         image (np.ndarray): Original image (RGB or grayscale).
@@ -361,12 +373,20 @@ def visualize_endpoint_detection(
         plt.title("Cleaned")
         plt.imshow(results["cleaned"], cmap="gray")
         plt.axis("off")
-    debug_img = cv2.cvtColor(results["crop"].copy(), cv2.COLOR_GRAY2RGB)
+    crop = results.get("crop")
+    if crop is None:
+        plt.close()
+        return
+    debug_img = cv2.cvtColor(crop.copy(), cv2.COLOR_GRAY2RGB)
     if results.get("candidates") is not None:
         for x, y, w, h in results["candidates"]:
             cv2.rectangle(debug_img, (x, y), (x + w, y + h), (255, 0, 0), 2)
     plt.subplot(2, 3, 6)
-    plt.title(f"Detected Shapes, length={results.get('length', 'N/A'):.1f}px")
+    length_val = results.get("length", "N/A")
+    if isinstance(length_val, float):
+        plt.title(f"Detected Shapes, length={length_val:.1f}px")
+    else:
+        plt.title(f"Detected Shapes, length={length_val}")
     plt.imshow(debug_img, cmap="gray")
     plt.tight_layout()
     plt.savefig(debug_path)
@@ -378,7 +398,7 @@ def visualize_ruler_detection(
     results: Dict[str, Any],
     debug_path: str,
 ) -> None:
-    """Save a debug visualization for ruler-graduation detection stages.
+    """Save a debug visualisation for ruler-graduation detection stages.
 
     Args:
         img (np.ndarray): Preprocessed grayscale ROI image.

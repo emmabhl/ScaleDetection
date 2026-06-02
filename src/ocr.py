@@ -74,7 +74,6 @@ class TextParser:
 
         Args:
             text (str): OCR'd text string to parse.
-            reversed (bool): If True, apply patterns where the unit precedes the value.
 
         Returns:
             result (Tuple[Optional[float], Optional[str]]):
@@ -89,9 +88,7 @@ class TextParser:
                 value_str = re.findall(r"\d+[.,]?\d*", text)
                 unit_str = unit_type
 
-                # Convert value to float (handle both comma and dot as decimal separator)
-                # convert found numeric substrings to floats (handle comma as decimal sep)
-                def _to_float(s):
+                def _to_float(s: str) -> Optional[float]:
                     try:
                         return float(s.replace(",", "."))
                     except (ValueError, AttributeError):
@@ -130,11 +127,10 @@ class TextParser:
 
 
 class OCRProcessor:
-    """OCR processor with multiple backend support."""
+    """OCR processor backed by PaddleOCR."""
 
     def __init__(self, confidence_threshold: float = 0.01):
-        """
-        Initialize OCR processor.
+        """Initialise the OCR processor.
 
         Args:
             confidence_threshold: Minimum confidence for detections
@@ -153,14 +149,13 @@ class OCRProcessor:
         Args:
             image (np.ndarray): Full input image (H,W,C or H,W).
             bbox (np.ndarray): ROI as (x_min, y_min, x_max, y_max) to apply OCR on.
-            reversed (bool, optional): If True, use reversed parsing patterns. Defaults to False.
-            plot_path (Optional[str], optional): Path prefix to save OCR debug image. Defaults to None.
+            plot_path (Optional[str]): Path prefix to save OCR debug image.
 
         Returns:
-            detection (LabelDetection): Parsed OCR result with confidence and optional parsed value/unit.
+            detection (LabelDetection): Parsed OCR result with confidence and
+                optional parsed value/unit.
         """
         try:
-            # Apply OCR to text label regions only
             x_min, y_min, x_max, y_max = bbox
 
             # Pad generously on the left so a leading digit ("2 mm", "1 mm") that
@@ -213,17 +208,17 @@ class OCRProcessor:
             )
 
         except Exception as e:
-            log.error(f"OCR processing failed: {e}")
+            log.error("OCR processing failed: %s", e)
             return LabelDetection(text="", confidence=0.0, bbox=None)
 
     def preprocess_image(self, image: np.ndarray) -> np.ndarray:
-        """Preprocess an image to improve OCR performance.
+        """Pre-process an image to improve OCR performance.
 
         Args:
             image (np.ndarray): Input image (H,W,C or H,W).
 
         Returns:
-            preprocessed (np.ndarray): Grayscale, contrast-enhanced and denoised image.
+            preprocessed (np.ndarray): Contrast-enhanced and denoised image.
         """
         img = image.copy()
 
@@ -257,11 +252,15 @@ class OCRProcessor:
 
         return img
 
+
 def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
-    """
-    Create a 3-panel PNG:
-        [input image] [image with bounding boxes] [legend with recognized text (small list)]
-    Save to plot_path (string).
+    """Create a 3-panel PNG: input image | boxes | recognised text legend.
+
+    Saves to ``plot_path``.
+
+    Args:
+        res (Dict[str, Any]): OCR result dictionary returned by PaddleOCR.
+        plot_path (str): Destination file path for the visualisation PNG.
     """
     # --- get image from common keys ---
     dp = res.get("doc_preprocessor_res", {}) if isinstance(res, dict) else {}
@@ -281,29 +280,20 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
         log.warning("No valid image found in OCR result.")
         return
 
-    # Normalize dtype/shape
+    # Normalise dtype/shape
     if not np.issubdtype(img.dtype, np.integer):
-        img = (
-            (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8)
-            if img.dtype == float
-            else img.astype(np.uint8)
-        )
+        img = (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8) if img.dtype == float else img.astype(np.uint8)
     if img.ndim == 3 and img.shape[2] == 4:
         img = img[:, :, :3]
     h, w = img.shape[:2]
 
-    # --- get recognized texts and boxes/polys ---
+    # --- get recognised texts and boxes/polys ---
     rec_texts = res.get("rec_texts") or []
     rec_scores = res.get("rec_scores") or []
     rec_boxes = res.get("rec_boxes")
     boxes = None
 
-    # If rec_boxes is a numpy array, use it (expected shape Nx4: x1,y1,x2,y2)
-    if (
-        isinstance(rec_boxes, np.ndarray)
-        and rec_boxes.ndim == 2
-        and rec_boxes.shape[1] >= 4
-    ):
+    if isinstance(rec_boxes, np.ndarray) and rec_boxes.ndim == 2 and rec_boxes.shape[1] >= 4:
         boxes = rec_boxes.astype(float)
     else:
         # fallback: build boxes from rec_polys by taking bounding rectangle
@@ -338,12 +328,11 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
 
     # middle: image with bounding boxes
     ax_boxes.imshow(img)
-    ax_boxes.set_title("Recognized boxes")
+    ax_boxes.set_title("Recognised boxes")
     ax_boxes.axis("off")
     if boxes is not None and isinstance(boxes, np.ndarray) and boxes.size:
         for i, b in enumerate(boxes):
             x1, y1, x2, y2 = b[:4]
-            # clip to image bounds
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w - 1, x2), min(h - 1, y2)
             if x2 > x1 and y2 > y1:
@@ -356,7 +345,6 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
                     facecolor="none",
                 )
                 ax_boxes.add_patch(rect)
-                # small index label
                 ax_boxes.text(
                     x1 + 2,
                     y1 + 2,
@@ -366,9 +354,9 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
                     bbox=dict(facecolor="yellow", edgecolor="none", pad=0.2, alpha=0.8),
                 )
 
-    # right: legend with recognized texts (compact, centered, enlarged)
+    # right: legend with recognised texts
     ax_legend.axis("off")
-    ax_legend.set_title("Recognized text")
+    ax_legend.set_title("Recognised text")
 
     lines = []
     n = max(len(rec_texts), 0)
@@ -381,12 +369,9 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
         lines.append(label)
 
     if not lines:
-        ax_legend.text(
-            0.5, 0.5, "No recognized\ntext", ha="center", va="center", fontsize=36
-        )
+        ax_legend.text(0.5, 0.5, "No recognised\ntext", ha="center", va="center", fontsize=36)
     else:
-        # vertical stacking
-        line_height = 0.1  # adjust for huge font
+        line_height = 0.1
         y = 0.9
         for line in lines:
             ax_legend.text(
@@ -403,11 +388,10 @@ def visualize_output(res: Dict[str, Any], plot_path: str) -> None:
             if y < 0.05:
                 break
 
-    # tighten and save
     plt.tight_layout()
     try:
         fig.savefig(str(plot_path), bbox_inches="tight", pad_inches=0.1)
     except Exception as e:
-        log.error("Failed to save subplot visualization: %s", e)
+        log.error("Failed to save subplot visualisation: %s", e)
     finally:
         plt.close(fig)
