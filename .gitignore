@@ -208,6 +208,7 @@ __marimo__/
 
 # Data files
 data/
+RIG_images/images
 data_small/
 *.jpg
 atypical_examples/
@@ -221,10 +222,11 @@ models*/
 embeddings*/
 
 # Logs
-*logs*
+#*logs*
 .DS_Store
 
 # Outputs
 **/outputs*/
 **nosync**
 **nosync**/*
+*.json
